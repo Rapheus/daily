@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "daily"
+version = "0.1.0"
+description = "EXR sequence to QuickTime dailies encoder"
+requires-python = ">=3.10"
+dependencies = [
+    "OpenEXR>=1.3.9",
+    "opencolorio>=2.0.0",
+    "numpy>=1.21.0",
+    "Pillow>=8.0.0",
+    "pyyaml>=6.0",
+    "pyseq>=0.7.0",
+    "rich>=12.0.0",
+    "pydantic>=2.0.0",
+    "timecode>=1.3.0",
+]
+
+[project.optional-dependencies]
+tui = ["textual>=0.50.0"]
+
+[project.scripts]
+daily = "daily.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["daily"]
+include = [
+    "daily/config/*.yaml",
+    "daily/fonts/*.ttf",
+]
+

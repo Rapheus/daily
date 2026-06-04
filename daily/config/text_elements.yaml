@@ -1,0 +1,75 @@
+# Default text overlay elements.
+# Copy to ./text_elements.yaml in your project directory and customise.
+#
+# font:          path to a .ttf file used as the default for all elements (null = bundled Vera.ttf)
+# content types: timecode | framecounter | framerange | date | time_of_day |
+#                filename | sequence_name | metadata.<key> | <custom-cli-key>
+# anchor:        top-left | top-center | top-right |
+#                bottom-left | bottom-center | bottom-right | center
+# default:       shown when the content resolves to nothing (e.g. --text key not passed)
+# font_size and offset values are relative to 1080p and scale automatically.
+
+font: VeraSe.ttf
+enable: true
+
+elements:
+
+  - content: sequence_name
+    anchor: top-left
+    offset: [24, 24]
+    font_size: 24
+    color: [1.0, 1.0, 1.0, 1.0]
+    shadow: true
+
+  - content: date
+    anchor: top-right
+    offset: [24, 24]
+    format: "%Y-%m-%d"
+    font_size: 24
+    color: [1.0, 1.0, 1.0, 1.0]
+    shadow: true
+
+  - content: time_of_day
+    anchor: top-right
+    offset: [24, 24]
+    format: "%H:%M"
+    font_size: 24
+    color: [1.0, 1.0, 1.0, 1.0]
+    shadow: true
+
+  - content: timecode
+    anchor: bottom-center
+    offset: [0, 24]
+    font_size: 24
+    color: [1.0, 1.0, 1.0, 1.0]
+    shadow: true
+
+  - content: framerange
+    anchor: bottom-right
+    offset: [24, 24]
+    font_size: 24
+    color: [1.0, 1.0, 1.0, 1.0]
+    shadow: true
+
+  - content: framecounter
+    anchor: bottom-right
+    offset: [24, 24]
+    font_size: 24
+    color: [1.0, 1.0, 1.0, 1.0]
+    shadow: true
+
+  - content: user
+    anchor: bottom-left
+    offset: [24, 24]
+    default: "Username"
+    font_size: 24
+    color: [1.0, 1.0, 1.0, 1.0]
+    shadow: true
+
+  - content: description
+    anchor: bottom-left
+    offset: [24, 24]
+    default: "Description"
+    font_size: 24
+    color: [1.0, 1.0, 1.0, 1.0]
+    shadow: true

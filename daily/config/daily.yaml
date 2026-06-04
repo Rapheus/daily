@@ -1,0 +1,46 @@
+# Daily configuration template.
+# Copy to ./daily.yaml in your project directory and customise.
+# CLI flags override any value here.
+
+# ── ffmpeg ────────────────────────────────────────────────────────────────────
+# Explicit path to the ffmpeg binary. Leave null to search PATH.
+# Windows example: "C:/ffmpeg/bin/ffmpeg.exe"
+ffmpeg: null
+
+# ── OCIO ──────────────────────────────────────────────────────────────────────
+# Priority: --ocio flag  →  config below  →  $OCIO env var  →  error
+ocio:
+  config: "$OCIO"           # path to .ocio file, or "$ENV_VAR"
+  transform:
+    type: display           # colorconvert | display | look
+    src: "ACES - ACEScg"
+    display: "sRGB - Display"
+    view: "ACES 1.0 - SDR Video"
+    looks: []
+
+# ── Output ────────────────────────────────────────────────────────────────────
+output:
+  codec: h264_hq            # must match a key in codecs.yaml
+  resolution: null          # [width, height] or null to use source EXR resolution
+  framerate: "24"           # "24", "25", "29.97", "30", etc.
+  directory: "."            # output directory for named files
+  trim_overscan: true       # crop data window to display window on read
+
+# ── Cropmask (aspect ratio bars) ─────────────────────────────────────────────
+# Overlay dark bars to enforce a target aspect ratio (e.g. 1.85:1 cinema).
+# Overscan trimming is controlled separately by output.trim_overscan above.
+cropmask:
+  enable: false
+  aspect: 1.85
+  opacity: 0.7
+
+# ── Slate ─────────────────────────────────────────────────────────────────────
+slate:
+  enable: false
+  frame_path: null          # path to slate image (PNG, JPG, EXR, etc.)
+  duration_frames: 1        # number of frames to hold the slate
+  fit: horizontal           # horizontal (fit width) | vertical (fit height)
+
+# ── Text overlays ─────────────────────────────────────────────────────────────
+# Controlled via text_elements.yaml (enable + font + element list).
+# Use --text-enable / --no-text-enable to override from CLI.

@@ -1,0 +1,28 @@
+# Generated / virtual environments
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Source repo (inspiration only, not part of this project)
+generate-dailies/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs / temp
+*.log
+*.mov
+to_implement.txt
+ARCHITECTURE.md
+MULTITHREADING.md

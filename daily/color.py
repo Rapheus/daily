@@ -1,0 +1,70 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import PyOpenColorIO as ocio
+
+from .config import OCIOTransformConfig
+
+
+class ColorError(Exception):
+    pass
+
+
+class OCIOProcessor:
+    """Applies an OCIO color transform to float32 numpy arrays (H, W, 3).
+
+    Raises ColorError on misconfigured colorspaces instead of silently
+    producing wrong-colored output.
+    """
+
+    def __init__(self, transform_config: OCIOTransformConfig, config_path: Path):
+        try:
+            self._ocio_cfg = ocio.Config.CreateFromFile(str(config_path))
+        except Exception as e:
+            raise ColorError(f"Failed to load OCIO config {config_path}: {e}") from e
+
+        self._transform_config = transform_config
+        self._cpu = self._build_cpu_processor()
+
+    def _build_cpu_processor(self) -> ocio.CPUProcessor:
+        tc = self._transform_config
+        try:
+            match tc.type:
+                case "colorconvert":
+                    transform = ocio.ColorSpaceTransform(
+                        src=tc.src,
+                        dst=tc.dst,
+                    )
+                case "display":
+                    transform = ocio.DisplayViewTransform(
+                        src=tc.src,
+                        display=tc.display,
+                        view=tc.view,
+                    )
+                case "look":
+                    transform = ocio.LookTransform(
+                        src=tc.src,
+                        dst=tc.dst,
+                        looks=",".join(tc.looks),
+                    )
+                case _:
+                    raise ColorError(f"Unknown OCIO transform type: {tc.type!r}")
+
+            processor = self._ocio_cfg.getProcessor(transform)
+            return processor.getDefaultCPUProcessor()
+
+        except ocio.Exception as e:
+            raise ColorError(
+                f"OCIO transform setup failed ({tc.type}, src={tc.src!r}): {e}"
+            ) from e
+
+    def apply(self, buf: np.ndarray) -> np.ndarray:
+        """Apply transform in-place on a copy; returns float32 (H, W, 3)."""
+        result = buf.copy()
+        try:
+            self._cpu.applyRGB(result)
+        except Exception as e:
+            raise ColorError(f"OCIO transform failed: {e}") from e
+        return result
