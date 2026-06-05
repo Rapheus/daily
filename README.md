@@ -4,7 +4,7 @@
 
 `daily` is a command-line tool that converts linear-light EXR frame sequences into review-ready video clips, applying a full ACES colour pipeline via OpenColorIO and encoding to your codec of choice through FFmpeg.
 
-![daily output — desert sunset shot with text overlays](screenshot.jpg)
+![daily output — desert sunset shot with text overlays](.github/assets/screenshot.jpg)
 
 ---
 
@@ -18,7 +18,7 @@ This project draws inspiration from [jedypod's `generate-dailies`](https://githu
 
 ## Features
 
-- **ACES colour pipeline** — full OpenColorIO integration; configure any transform type (`colorconvert`, `display`, `look`) against any OCIO config
+- **ACES colour pipeline** — full OpenColorIO integration; configure any transform type (`colorconvert`, `display`, `look`) against any OCIO config. The tool is ACES-version-agnostic: ACES 1.x (including 1.3) and ACES 2.0 are equally supported — point `ocio.config` at the right `.ocio` file and set the colorspace/view names to match
 - **Minimal dependencies** — EXR reading is handled by the `OpenEXR` Python package; no OpenImageIO required
 - **Cross-platform** — runs on Windows, macOS, and Linux
 - **Multi-batch encoding** — pass a directory, a single file, or a glob pattern (`shots/**/*.exr`); `daily` discovers all EXR sequences automatically, grouping frames and handling same-named sequences across subdirectories
@@ -66,22 +66,10 @@ pip install .
 
 ## Example
 
-```bash
-# Encode every EXR sequence found under shots/ as ProRes HQ,
-# apply ACES colour, inject artist and description text, prepend a slate,
-# and write the results to a reviews/ directory.
+A self-contained example lives in `example/` — EXR sequence, OCIO config, and slate frame are all included. `config/daily.yaml` is pre-configured to point at them, so a single command is enough. To encode as ProRes HQ with a custom artist tag instead:
 
-daily \
-  -i shots/ \
-  -o reviews/ \
-  --codec prores_hq \
-  --ocio-config /opt/ocio/aces_1.3/config.ocio \
-  --output-framerate 24 \
-  --text artist="Jane Smith" \
-  --text description="comp v003" \
-  --slate-enable \
-  --slate-frame-path slate.png \
-  --slate-duration-frames 24
+```bash
+daily -i example/input/**/*.exr -o example/output/ --slate-enable --text user="Raphael" --text description="comp v003"
 ```
 
 ---
@@ -126,7 +114,7 @@ EXR file
               embedded in the container header.
 ```
 
-If a slate is configured, the slate image is inserted before the sequence frames and passed through steps 3–6 (resize, optional cropmask, text overlays) for the specified duration.
+If a slate is configured, the slate image is fitted to the canvas (with letterboxing) and inserted before the sequence frames. Text overlays are intentionally suppressed on the slate; only the EXR frames carry them. An optional `ocio_transform: true` flag in `daily.yaml` applies the same colour pipeline to the slate, which is useful when `frame_path` points to a linear EXR rather than a display-referred PNG.
 
 Steps 1–5 run concurrently in a thread pool. Each worker processes a chunk of frames and delivers ordered results to the FFmpeg pipe.
 
@@ -153,7 +141,7 @@ ocio:
     type: display     # colorconvert | display | look
     src: "ACES - ACEScg"
     display: "sRGB - Display"
-    view: "ACES 1.0 - SDR Video"
+    view: "ACES 2.0 - SDR 100 nits (Rec.709)"   # must match a view in your OCIO config
     looks: []
 
 output:
@@ -253,6 +241,44 @@ Font size and offset values are specified at 1080p and scale automatically to th
 
 ---
 
+## Pipeline integration
+
+`daily` follows the Unix convention of separating human-readable output from data:
+
+- **stderr** — progress bar, structured logs, warnings
+- **stdout** — one output file path per line, printed after all sequences finish
+
+This means you can capture produced files in any shell or scripting context without parsing log output:
+
+```bash
+# capture paths into a shell variable
+OUTPUT=$(daily -i shots/ -o reviews/)
+
+# write paths to a file while logs still appear in the terminal
+daily -i shots/ -o reviews/ > paths.txt
+
+# suppress all human output (logs + progress go to stderr)
+daily -i shots/ -o reviews/ 2>/dev/null
+
+# pipe paths directly into another tool
+daily -i shots/ -o reviews/ | xargs -I{} cp {} /archive/
+```
+
+When using `daily` as a **Python library**, `run()` returns a `list[Path]` of produced files:
+
+```python
+from pathlib import Path
+from daily.config import build_config, load_codecs, load_user_config, load_text_overlays
+from daily.daily import run
+
+config = build_config(...)
+out_paths: list[Path] = run(config)
+for p in out_paths:
+    print(p)
+```
+
+---
+
 ## CLI Reference
 
 ```
@@ -293,10 +319,10 @@ Only `-i` / `--input` is required. All other flags are optional and fall back to
 | Flag | Description |
 |------|-------------|
 | `--ocio-config PATH` | OCIO config path; default: `$OCIO` env var |
-| `--ocio-transform-type TYPE` | `colorconvert` \| `display` \| `look`; default: `display` |
-| `--ocio-transform-src NAME` | Source colourspace; default: `ACES - ACEScg` |
-| `--ocio-transform-display NAME` | Display colourspace; default: `sRGB - Display` |
-| `--ocio-transform-view NAME` | View transform; default: `ACES 1.0 - SDR Video` |
+| `--ocio-transform-type TYPE` | `colorconvert` \| `display` \| `look`; required — set in `daily.yaml` |
+| `--ocio-transform-src NAME` | Source colourspace; required — set in `daily.yaml` |
+| `--ocio-transform-display NAME` | Display colourspace; required for `display` type — set in `daily.yaml` |
+| `--ocio-transform-view NAME` | View transform; required for `display` type — set in `daily.yaml` |
 
 **Optional — slate**
 

@@ -16,8 +16,13 @@ dist/
 *.swp
 .DS_Store
 Thumbs.db
+*.code-workspace
 
 # Logs / temp
 *.log
 *.mov
 design-document.md
+
+# Example output
+example/output/*
+!example/output/.gitkeep

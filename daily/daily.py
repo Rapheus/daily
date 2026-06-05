@@ -59,10 +59,11 @@ def run(
     config: DailyConfig,
     progress_cb: ProgressCallback | None = None,
     verbose: bool = False,
-) -> None:
+) -> list[Path]:
     """Encode all sequences described by config.
 
     progress_cb receives (completed_frames, total_frames) after each frame.
+    Returns the list of output file paths that were produced.
     """
     if config.input_path is None:
         raise ValueError("config.input_path must be set before calling run()")
@@ -100,7 +101,12 @@ def run(
 
         renderer = TextRenderer((width, height), default_font=config.text_font)
 
-        start_tc = tc_helper.tc_from_frame(seq.start)
+        tc_start = (
+            seq.start - config.slate.duration_frames
+            if config.slate.enable
+            else seq.start
+        )
+        start_tc = tc_helper.tc_from_frame(tc_start)
         end_tc = tc_helper.tc_from_frame(seq.end)
 
         seq_ctx = FrameContext(
@@ -137,8 +143,12 @@ def run(
             codec_preset, out, width, height, config.output.framerate,
             ffmpeg_bin=ffmpeg_bin, start_timecode=start_tc, verbose=verbose,
         ) as enc:
-            if slate_gen and config.slate.frame_path:
-                slate_frame = slate_gen.generate(config.slate, (width, height))
+            if slate_gen:
+                slate_frame = slate_gen.generate(
+                    config.slate,
+                    (width, height),
+                    ocio_processor=ocio if config.slate.ocio_transform else None,
+                )
                 for _ in range(config.slate.duration_frames):
                     enc.write_frame(slate_frame)
 
@@ -172,3 +182,5 @@ def run(
                                 progress_cb(frame.index + 1, len(seq))
 
         log.info("  done")
+
+    return out_paths

@@ -22,11 +22,11 @@ class CodecPreset(BaseModel):
 # ── OCIO ──────────────────────────────────────────────────────────────────────
 
 class OCIOTransformConfig(BaseModel):
-    type: Literal["colorconvert", "display", "look"] = "display"
-    src: str = "ACES - ACEScg"
+    type: Literal["colorconvert", "display", "look"]
+    src: str
     dst: str | None = None
-    display: str | None = "sRGB - Display"
-    view: str | None = "ACES 1.0 - SDR Video"
+    display: str | None = None
+    view: str | None = None
     looks: list[str] = []
 
     @model_validator(mode="after")
@@ -42,7 +42,7 @@ class OCIOTransformConfig(BaseModel):
 
 class OCIOConfig(BaseModel):
     config: str = "$OCIO"
-    transform: OCIOTransformConfig = OCIOTransformConfig()
+    transform: OCIOTransformConfig
 
 
 # ── Output ────────────────────────────────────────────────────────────────────
@@ -71,6 +71,7 @@ class SlateConfig(BaseModel):
     frame_path: Path | None = None
     duration_frames: int = 24
     fit: Literal["horizontal", "vertical"] = "horizontal"
+    ocio_transform: bool = False
 
     @field_validator("frame_path")
     @classmethod
@@ -111,7 +112,7 @@ class TextElementConfig(BaseModel):
 # ── Top-level config ──────────────────────────────────────────────────────────
 
 class DailyConfig(BaseModel):
-    ocio: OCIOConfig = OCIOConfig()
+    ocio: OCIOConfig
     output: OutputConfig = OutputConfig()
     cropmask: CropmaskConfig = CropmaskConfig()
     slate: SlateConfig = SlateConfig()

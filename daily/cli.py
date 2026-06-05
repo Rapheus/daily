@@ -24,6 +24,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 if sys.stderr.encoding and sys.stderr.encoding.lower() != "utf-8":
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
+from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import (
     BarColumn,
@@ -130,7 +131,7 @@ def _parse_text_args(raw: list[str] | None) -> dict[str, str]:
     return result
 
 
-def cmd_encode(args: argparse.Namespace) -> None:
+def cmd_encode(args: argparse.Namespace, console: Console) -> None:
     from . import daily
 
     # ── Load + merge config ──────────────────────────────────────────────────
@@ -176,6 +177,7 @@ def cmd_encode(args: argparse.Namespace) -> None:
         MofNCompleteColumn(),
         TaskProgressColumn(),
         TimeRemainingColumn(),
+        console=console,
         transient=False,
     ) as progress:
         task = progress.add_task("Encoding", total=None)
@@ -184,10 +186,13 @@ def cmd_encode(args: argparse.Namespace) -> None:
             progress.update(task, completed=done, total=total)
 
         try:
-            daily.run(config, progress_cb=on_progress, verbose=args.verbose)
+            out_paths = daily.run(config, progress_cb=on_progress, verbose=args.verbose)
         except Exception as e:
             print(f"\nError: {e}", file=sys.stderr)
             sys.exit(1)
+
+    for p in out_paths:
+        print(p)
 
 
 def main() -> None:
@@ -234,15 +239,16 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    stderr = Console(stderr=True)
     level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
         level=level,
         format="%(message)s",
-        handlers=[RichHandler(rich_tracebacks=True, show_path=False)],
+        handlers=[RichHandler(rich_tracebacks=True, show_path=False, console=stderr)],
     )
     logging.getLogger("PIL").setLevel(logging.WARNING)
 
-    cmd_encode(args)
+    cmd_encode(args, console=stderr)
 
 
 if __name__ == "__main__":
