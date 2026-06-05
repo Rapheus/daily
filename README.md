@@ -1,8 +1,6 @@
 # daily
 
 
-**EXR sequence → display-referred QuickTime movies for VFX dailies.**
-
 `daily` is a command-line tool that converts EXR frame sequences into review-ready video clips, applying a full ACES colour pipeline via OpenColorIO and encoding to your codec of choice through FFmpeg.
 
 ![daily output — desert sunset shot with text overlays](.github/assets/screenshot.jpg)
@@ -122,16 +120,12 @@ EXR file
               embedded in the container header.
 ```
 
-Steps 1–5 run concurrently in a thread pool. Each worker processes a chunk of frames and delivers ordered results to the FFmpeg pipe.
-
----
-
 
 
 
 ## Configuration
 
-Three YAML files control every aspect of `daily`'s behaviour. Bundled defaults are used when no local copy is found; copy the files from `config/` into your project directory to customise them.
+Three YAML files control every aspect of `daily`'s behaviour. copy the files from `config/` into your project directory to customise them.
 
 | File | Purpose |
 |------|---------|
@@ -174,6 +168,9 @@ slate:
 
 Every key in `daily.yaml` can be overridden from the command line — see the CLI reference below.
 
+
+
+
 ### `codecs.yaml`
 
 Defines named codec presets. The `codec` key maps to an FFmpeg encoder, with optional `pix_fmt`, `crf`, and free-form `ffmpeg_args`.
@@ -197,6 +194,9 @@ prores_4444:
 ```
 
 Bundled presets: `h264_hq`, `h264_lq`, `prores_hq`, `prores_4444`, `prores_proxy`, `dnxhr_hqx`, `dnxhr_sq`, `hevc_hq`.
+
+
+
 
 ### `text_overlays.yaml`
 
@@ -245,8 +245,6 @@ elements:
 | `sequence_name` | Parent directory / sequence name |
 | `metadata.<key>` | Value from the EXR header |
 | `<custom-key>` | Any key passed via `--text key=value` |
-
-Font size and offset values are specified at 1080p and scale automatically to the output resolution.
 
 ---
 
@@ -370,4 +368,3 @@ Every scalar field in `daily.yaml` has a corresponding `--` flag. Anything you c
 | Flag | Description |
 |------|-------------|
 | `-v, --verbose` | Verbose / debug logging |
-
