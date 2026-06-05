@@ -1,20 +1,23 @@
 # daily
 
+
 **EXR sequence → display-referred QuickTime movies for VFX dailies.**
 
-`daily` is a command-line tool that converts linear-light EXR frame sequences into review-ready video clips, applying a full ACES colour pipeline via OpenColorIO and encoding to your codec of choice through FFmpeg.
+`daily` is a command-line tool that converts EXR frame sequences into review-ready video clips, applying a full ACES colour pipeline via OpenColorIO and encoding to your codec of choice through FFmpeg.
 
 ![daily output — desert sunset shot with text overlays](.github/assets/screenshot.jpg)
 
 ---
 
+
+
 ## Inspiration
 
-This project draws inspiration from [jedypod's `generate-dailies`](https://github.com/jedypod/generate-dailies).
-
-`daily` is a reimagining of that idea with a narrower dependency footprint: no OpenImageIO, no compiled image libraries beyond the lean `OpenEXR` Python bindings.
+`daily` is a full rewrite of [jedypod's `generate-dailies`](https://github.com/jedypod/generate-dailies) with a narrower dependency footprint: no OpenImageIO, no compiled image libraries beyond the lean `OpenEXR` Python bindings.
 
 ---
+
+
 
 ## Features
 
@@ -31,18 +34,19 @@ This project draws inspiration from [jedypod's `generate-dailies`](https://githu
 
 ---
 
+
+
+
 ## Requirements
 
 - **Python 3.10+**
 - **FFmpeg** — must be available on your `PATH`, or set the explicit path via `--ffmpeg` / the `ffmpeg:` key in `daily.yaml`
 - **OCIO config** — set the `$OCIO` environment variable to the path of your `.ocio` file before running, or specify it in `daily.yaml`
 
-```bash
-export OCIO=/path/to/aces_1.3/config.ocio   # macOS / Linux
-$env:OCIO = "C:\ocio\aces_1.3\config.ocio"  # Windows PowerShell
-```
-
 ---
+
+
+
 
 ## Installation
 
@@ -60,19 +64,23 @@ source .venv/bin/activate
 pip install .
 ```
 
-`opencolorio` and `OpenEXR` ship as pre-built wheels on PyPI for most platforms (Windows, macOS, Linux x86-64), so no separate compilation step is needed.
-
 ---
 
-## Example
 
-A self-contained example lives in `example/` — EXR sequence, OCIO config, and slate frame are all included. `config/daily.yaml` is pre-configured to point at them, so a single command is enough. To encode as ProRes HQ with a custom artist tag instead:
+
+
+## Example Usage
+
+A self-contained example lives in `example/` — EXR sequence, OCIO config, and slate frame are all included. `config/daily.yaml` is pre-configured to point at them, here's an example command:
 
 ```bash
 daily -i example/input/**/*.exr -o example/output/ --slate-enable --text user="Raphael" --text description="comp v003"
 ```
 
 ---
+
+
+
 
 ## Processing Pipeline
 
@@ -114,11 +122,12 @@ EXR file
               embedded in the container header.
 ```
 
-If a slate is configured, the slate image is fitted to the canvas (with letterboxing) and inserted before the sequence frames. Text overlays are intentionally suppressed on the slate; only the EXR frames carry them. An optional `ocio_transform: true` flag in `daily.yaml` applies the same colour pipeline to the slate, which is useful when `frame_path` points to a linear EXR rather than a display-referred PNG.
-
 Steps 1–5 run concurrently in a thread pool. Each worker processes a chunk of frames and delivers ordered results to the FFmpeg pipe.
 
 ---
+
+
+
 
 ## Configuration
 
@@ -241,6 +250,9 @@ Font size and offset values are specified at 1080p and scale automatically to th
 
 ---
 
+
+
+
 ## Pipeline integration
 
 `daily` follows the Unix convention of separating human-readable output from data:
@@ -279,6 +291,9 @@ for p in out_paths:
 
 ---
 
+
+
+
 ## CLI Reference
 
 ```
@@ -286,6 +301,8 @@ daily -i PATH [options]
 ```
 
 Only `-i` / `--input` is required. All other flags are optional and fall back to the values in `daily.yaml` (or the bundled defaults) when omitted.
+
+Every scalar field in `daily.yaml` has a corresponding `--` flag. Anything you can set in the config file can be overridden on the command line.
 
 **Required**
 
@@ -353,6 +370,4 @@ Only `-i` / `--input` is required. All other flags are optional and fall back to
 | Flag | Description |
 |------|-------------|
 | `-v, --verbose` | Verbose / debug logging |
-
-Every scalar field in `daily.yaml` has a corresponding `--` flag. Anything you can set in the config file can be overridden on the command line.
 
