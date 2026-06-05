@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
-from importlib import resources
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # ── Codec preset ──────────────────────────────────────────────────────────────
@@ -53,8 +51,9 @@ class OutputConfig(BaseModel):
     codec: str = "h264_hq"
     resolution: tuple[int, int] | None = None  # None = use source EXR resolution
     framerate: str = "24"
-    directory: Path = Path(".")
+    directory: Path | None = None
     trim_overscan: bool = True
+    threads: int = Field(default_factory=lambda: os.cpu_count() or 1)
 
 
 # ── Cropmask ──────────────────────────────────────────────────────────────────
@@ -118,7 +117,7 @@ class DailyConfig(BaseModel):
     slate: SlateConfig = SlateConfig()
     text_enable: bool = True
     text_font: Path | None = None   # None = bundled Vera.ttf
-    text_elements: list[TextElementConfig] = []
+    text_overlays: list[TextElementConfig] = []
 
     # From yaml (optional explicit path to ffmpeg binary)
     ffmpeg: str | None = None
@@ -130,16 +129,6 @@ class DailyConfig(BaseModel):
     output_path_override: Path | None = None
 
     model_config = {"arbitrary_types_allowed": True}
-
-    @model_validator(mode="after")
-    def codec_must_exist(self) -> "DailyConfig":
-        if self.codecs and self.output.codec not in self.codecs:
-            available = ", ".join(self.codecs)
-            raise ValueError(
-                f"Codec '{self.output.codec}' not in codecs.yaml. "
-                f"Available: {available}"
-            )
-        return self
 
 
 # ── OCIO path resolution ──────────────────────────────────────────────────────
@@ -190,9 +179,8 @@ def resolve_ffmpeg(config: DailyConfig) -> str:
 # ── YAML loaders ──────────────────────────────────────────────────────────────
 
 def _bundled(name: str) -> Path:
-    """Return path to a file bundled inside the daily package."""
-    pkg = resources.files("daily")
-    return Path(str(pkg / name))
+    """Return path to a project-level config/font file (root/config or root/fonts)."""
+    return Path(__file__).parent.parent / name
 
 
 def load_codecs(path: Path | None = None) -> dict[str, CodecPreset]:
@@ -213,10 +201,10 @@ def load_user_config(path: Path | None = None) -> dict[str, Any]:
     return yaml.safe_load(bundled.read_text(encoding="utf-8")) or {}
 
 
-def load_text_elements(
+def load_text_overlays(
     path: Path | None = None,
 ) -> tuple[Path | None, bool | None, list[Any]]:
-    """Load text_elements.yaml, preferring explicit path → cwd → bundled default.
+    """Load text_overlays.yaml, preferring explicit path → cwd → bundled default.
 
     Returns (font_path, enable, elements).
     - font_path: resolved Path to the font file, or None if not specified.
@@ -228,11 +216,11 @@ def load_text_elements(
     if path is not None:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     else:
-        cwd_cfg = Path("text_elements.yaml")
+        cwd_cfg = Path("text_overlays.yaml")
         if cwd_cfg.exists():
             raw = yaml.safe_load(cwd_cfg.read_text(encoding="utf-8")) or {}
         else:
-            bundled = _bundled("config/text_elements.yaml")
+            bundled = _bundled("config/text_overlays.yaml")
             raw = yaml.safe_load(bundled.read_text(encoding="utf-8")) or {}
 
     if isinstance(raw, list):
@@ -276,7 +264,7 @@ def _apply_dotpath(data: dict, key: str, value: Any) -> None:
 def build_config(
     user_yaml: dict[str, Any],
     codecs: dict[str, CodecPreset],
-    text_elements: list[Any] | None = None,
+    text_overlays: list[Any] | None = None,
     text_font: Path | None = None,
     text_enable: bool | None = None,
     *,
@@ -284,8 +272,8 @@ def build_config(
 ) -> DailyConfig:
     """Merge yaml + CLI overrides into a validated DailyConfig."""
     data = dict(user_yaml)
-    if text_elements is not None:
-        data["text_elements"] = text_elements
+    if text_overlays is not None:
+        data["text_overlays"] = text_overlays
     if text_font is not None:
         data["text_font"] = str(text_font)
     if text_enable is not None:

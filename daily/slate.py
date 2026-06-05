@@ -39,10 +39,11 @@ class SlateGenerator:
         y = (canvas_h - new_h) // 2
 
         arr = np.array(img).astype(np.float32) / 255.0
+        # Destination region on canvas (clamped to canvas bounds)
         y1, y2 = max(0, y), min(canvas_h, y + new_h)
         x1, x2 = max(0, x), min(canvas_w, x + new_w)
-        sy1, sy2 = y1 - y, new_h - (y + new_h - y2)
-        sx1, sx2 = x1 - x, new_w - (x + new_w - x2)
-        canvas[y1:y2, x1:x2] = arr[sy1:sy2, sx1:sx2]
+        # Corresponding source region (offset by how much was clipped on each edge)
+        sy1, sx1 = y1 - y, x1 - x
+        canvas[y1:y2, x1:x2] = arr[sy1:sy1 + (y2 - y1), sx1:sx1 + (x2 - x1)]
 
         return canvas

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import shlex
 import subprocess
 from pathlib import Path
@@ -11,8 +10,6 @@ import numpy as np
 
 if TYPE_CHECKING:
     from .config import CodecPreset
-
-log = logging.getLogger(__name__)
 
 
 class EncoderError(Exception):
@@ -26,10 +23,8 @@ class FFmpegEncoder:
     They are converted to uint16 rgb48le before piping so ffmpeg receives
     a lossless 16-bit intermediate regardless of the target pix_fmt.
 
-    ffmpeg's stderr is redirected to a temp file (not a pipe) to avoid the
-    classic deadlock where ffmpeg's verbose progress output fills the pipe
-    buffer and blocks both sides. On non-zero exit the file is read and
-    raised as EncoderError; on success it is deleted.
+    Pass verbose=True to inherit the parent stderr so ffmpeg output is
+    printed directly to the terminal.
     """
 
     def __init__(
@@ -52,7 +47,6 @@ class FFmpegEncoder:
         self._start_timecode = start_timecode
         self._verbose = verbose
         self._proc: subprocess.Popen | None = None
-        self._stderr_path: Path | None = None
 
     def _build_cmd(self) -> list[str]:
         cmd = [
@@ -81,17 +75,12 @@ class FFmpegEncoder:
         return cmd
 
     def __enter__(self) -> "FFmpegEncoder":
-        self._stderr_path = self._output.with_suffix(".ffmpeg.log")
-        stderr_fd = self._stderr_path.open("w")
-
-        cmd = self._build_cmd()
         self._proc = subprocess.Popen(
-            cmd,
+            self._build_cmd(),
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
-            stderr=stderr_fd,
+            stderr=None if self._verbose else subprocess.DEVNULL,
         )
-        stderr_fd.close()
         return self
 
     def write_frame(self, buf: np.ndarray) -> None:
@@ -100,8 +89,7 @@ class FFmpegEncoder:
         try:
             self._proc.stdin.write(frame.tobytes())
         except BrokenPipeError:
-            stderr = self._stderr_path.read_text(errors="replace") if self._stderr_path else ""
-            raise EncoderError(f"ffmpeg pipe broken:\n{stderr}") from None
+            raise EncoderError("ffmpeg pipe broken — re-run with -v for details") from None
 
     def __exit__(
         self,
@@ -119,11 +107,5 @@ class FFmpegEncoder:
 
         if exc_type is None and self._proc.returncode != 0:
             raise EncoderError(
-                f"ffmpeg exited {self._proc.returncode} -- log: {self._stderr_path}"
+                f"ffmpeg exited {self._proc.returncode} — re-run with -v for details"
             )
-
-        if self._stderr_path:
-            if self._verbose:
-                for line in self._stderr_path.read_text(errors="replace").splitlines():
-                    log.debug("ffmpeg: %s", line)
-            self._stderr_path.unlink(missing_ok=True)

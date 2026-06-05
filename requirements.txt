@@ -1,30 +1,9 @@
-# ── EXR image I/O ──────────────────────────────────────────────────────────────
 openexr>=3.2.0
-# pip installs the AcademySoftwareFoundation openexr 3.x package (Windows wheel available).
-
-# ── Color management ───────────────────────────────────────────────────────────
-# `opencolorio` on PyPI provides PyOpenColorIO bindings for Python 3.10+ on Windows.
 opencolorio>=2.0.0
-
-# ── Array ops + image processing ───────────────────────────────────────────────
 numpy>=1.21.0
 Pillow>=8.0.0
-
-# ── Config + validation ────────────────────────────────────────────────────────
 pyyaml>=6.0
 pydantic>=2.0.0
-
-# ── Sequence discovery ─────────────────────────────────────────────────────────
 pyseq>=0.7.0
-
-# ── Timecode arithmetic ────────────────────────────────────────────────────────
 timecode>=1.3.0
-
-# ── CLI progress display ───────────────────────────────────────────────────────
 rich>=12.0.0
-
-# ── System dependency (NOT pip-installable) ────────────────────────────────────
-# ffmpeg must be installed separately:
-#   Windows: winget install ffmpeg   OR   scoop install ffmpeg
-#   macOS:   brew install ffmpeg
-#   Linux:   apt install ffmpeg

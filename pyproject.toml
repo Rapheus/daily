@@ -27,8 +27,4 @@ daily = "daily.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["daily"]
-include = [
-    "daily/config/*.yaml",
-    "daily/fonts/*.ttf",
-]
 

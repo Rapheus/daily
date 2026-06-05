@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Callable
 
@@ -31,7 +33,26 @@ def _output_path(seq: SequenceInfo, config: DailyConfig) -> Path:
         if override.suffix.lower() not in {".mov", ".mp4", ".mxf", ".mkv"}:
             return override / f"{seq.name}_{config.output.codec}.mov"
         return override
-    return config.output.directory / f"{seq.name}_{config.output.codec}.mov"
+    out_dir = config.output.directory if config.output.directory is not None \
+              else seq.frames[0].path.parent
+    return out_dir / f"{seq.name}_{config.output.codec}.mov"
+
+
+def _deduplicate_paths(paths: list[Path]) -> list[Path]:
+    counts = Counter(paths)
+    seen: dict[Path, int] = {}
+    result = []
+    for p in paths:
+        if counts[p] > 1:
+            idx = seen.get(p, 0)
+            seen[p] = idx + 1
+            if idx == 0:
+                result.append(p)
+            else:
+                result.append(p.with_name(f"{p.stem}-{idx:02d}{p.suffix}"))
+        else:
+            result.append(p)
+    return result
 
 
 def run(
@@ -59,8 +80,15 @@ def run(
     sequences = discover_sequences(config.input_path)
     log.info(f"Found {len(sequences)} sequence(s) at {config.input_path}")
 
-    for seq in sequences:
-        out = _output_path(seq, config)
+    override = config.output_path_override
+    is_fixed_file = (
+        override is not None
+        and override.suffix.lower() in {".mov", ".mp4", ".mxf", ".mkv"}
+    )
+    raw_paths = [_output_path(seq, config) for seq in sequences]
+    out_paths = raw_paths if is_fixed_file else _deduplicate_paths(raw_paths)
+
+    for seq, out in zip(sequences, out_paths):
         out.parent.mkdir(parents=True, exist_ok=True)
 
         # Resolve output resolution: explicit config value or source EXR size
@@ -93,6 +121,18 @@ def run(
         )
         log.info(f"  -> {out}")
 
+        def _make_ctx(frame) -> FrameContext:
+            return FrameContext(
+                frame_path=frame.path,
+                frame_number=frame.number,
+                frame_index=frame.index,
+                seq_start=seq.start,
+                seq_end=seq.end,
+                sequence_name=seq.name,
+                exr_metadata={},
+                filename=frame.path.name,
+            )
+
         with FFmpegEncoder(
             codec_preset, out, width, height, config.output.framerate,
             ffmpeg_bin=ffmpeg_bin, start_timecode=start_tc, verbose=verbose,
@@ -102,25 +142,33 @@ def run(
                 for _ in range(config.slate.duration_frames):
                     enc.write_frame(slate_frame)
 
-            for frame in seq.frames:
-                ctx = FrameContext(
-                    frame_path=frame.path,
-                    frame_number=frame.number,
-                    frame_index=frame.index,
-                    seq_start=seq.start,
-                    seq_end=seq.end,
-                    sequence_name=seq.name,
-                    exr_metadata={},   # filled in by FrameProcessor.process()
-                    filename=frame.path.name,
-                )
-                try:
-                    buf = processor.process(frame.path, ctx)
-                    enc.write_frame(buf)
-                except FrameReadError as e:
-                    log.warning(str(e))
-                    enc.write_frame(_black_frame(width, height))
+            if config.output.threads <= 1:
+                for frame in seq.frames:
+                    try:
+                        buf = processor.process(frame.path, _make_ctx(frame))
+                        enc.write_frame(buf)
+                    except FrameReadError as e:
+                        log.warning(str(e))
+                        enc.write_frame(_black_frame(width, height))
+                    if progress_cb:
+                        progress_cb(frame.index + 1, len(seq))
+            else:
+                chunk_size = config.output.threads * 2
+                with ThreadPoolExecutor(max_workers=config.output.threads) as pool:
+                    for chunk_start in range(0, len(seq.frames), chunk_size):
+                        chunk = seq.frames[chunk_start : chunk_start + chunk_size]
+                        futures = [
+                            pool.submit(processor.process, f.path, _make_ctx(f))
+                            for f in chunk
+                        ]
+                        for frame, future in zip(chunk, futures):
+                            try:
+                                buf = future.result()
+                            except FrameReadError as e:
+                                log.warning(str(e))
+                                buf = _black_frame(width, height)
+                            enc.write_frame(buf)
+                            if progress_cb:
+                                progress_cb(frame.index + 1, len(seq))
 
-                if progress_cb:
-                    progress_cb(frame.index + 1, len(seq))
-
-        log.info(f"  done")
+        log.info("  done")

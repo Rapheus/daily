@@ -69,17 +69,16 @@ class TextContentResolver:
 
 # ── Renderer ──────────────────────────────────────────────────────────────────
 
-# Maps our anchor names to Pillow anchor codes + xy computation lambdas.
 # Pillow anchor codes: first char = h-align (l/m/r), second = v-align (a/m/d/s/b).
 # We use 'a' (ascender) for top and 's' (descender) for bottom.
-_ANCHOR_MAP: dict[str, tuple[str, str]] = {
-    "top-left":      ("la", "tl"),
-    "top-center":    ("ma", "tc"),
-    "top-right":     ("ra", "tr"),
-    "bottom-left":   ("ls", "bl"),
-    "bottom-center": ("ms", "bc"),
-    "bottom-right":  ("rs", "br"),
-    "center":        ("mm", "cc"),
+_ANCHOR_MAP: dict[str, str] = {
+    "top-left":      "la",
+    "top-center":    "ma",
+    "top-right":     "ra",
+    "bottom-left":   "ls",
+    "bottom-center": "ms",
+    "bottom-right":  "rs",
+    "center":        "mm",
 }
 
 
@@ -108,7 +107,7 @@ def _xy_for_anchor(
 def _load_font(font_path: Path | None, size: float, default: Path | None = None) -> ImageFont.FreeTypeFont:
     path = font_path or default
     if path is None:
-        raise ValueError("No font specified. Set 'font' in text_elements.yaml.")
+        raise ValueError("No font specified. Set 'font' in text_overlays.yaml.")
     return ImageFont.truetype(str(path), size=int(size))
 
 
@@ -172,30 +171,6 @@ class TextRenderer:
             self._draw_element(draw, el, text, y_stack)
         return _composite_overlay(buf, overlay)
 
-    def composite_static(
-        self,
-        buf: np.ndarray,
-        static_overlay: Image.Image,
-    ) -> np.ndarray:
-        return _composite_overlay(buf, static_overlay)
-
-    def build_static_overlay(
-        self,
-        elements: list[TextElementConfig],
-        resolver: TextContentResolver,
-        ctx: FrameContext,
-    ) -> Image.Image:
-        overlay = Image.new("RGBA", (self.width, self.height), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(overlay)
-        active = [el for el in elements if el.enable]
-        stack_offsets = self._stack_offsets(active)
-        for el, y_stack in zip(active, stack_offsets):
-            text = resolver.resolve(el.content, ctx, el.format, default=el.default)
-            if not text.strip():
-                continue
-            self._draw_element(draw, el, text, y_stack)
-        return overlay
-
     def _draw_element(
         self,
         draw: ImageDraw.ImageDraw,
@@ -213,7 +188,7 @@ class TextRenderer:
             round(el.shadow_offset[1] * self._scale),
         )
         font = _load_font(el.font, scaled_size, default=self._default_font)
-        pillow_anchor, _ = _ANCHOR_MAP.get(el.anchor, ("la", "tl"))
+        pillow_anchor = _ANCHOR_MAP.get(el.anchor, "la")
         xy = _xy_for_anchor(el.anchor, scaled_offset, self.width, self.height)
         xy = (xy[0], xy[1] + y_stack)
         color = _to_pil_color(el.color)
@@ -234,5 +209,4 @@ def _composite_overlay(buf: np.ndarray, overlay: Image.Image) -> np.ndarray:
     ov = np.array(overlay).astype(np.float32) / 255.0   # H, W, 4
     alpha = ov[:, :, 3:4]
     rgb = ov[:, :, :3]
-    result = buf * (1.0 - alpha) + rgb * alpha
-    return result.astype(np.float32)
+    return buf * (1.0 - alpha) + rgb * alpha

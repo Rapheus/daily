@@ -5,12 +5,7 @@ import logging
 import sys
 import types as _builtins_types
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
-
-try:
-    from typing import Literal
-except ImportError:
-    from typing_extensions import Literal  # type: ignore
+from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -40,11 +35,11 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from .config import DailyConfig, _coerce, build_config, load_codecs, load_text_elements, load_user_config
+from .config import DailyConfig, _coerce, build_config, load_codecs, load_text_overlays, load_user_config
 
 # Fields that exist on DailyConfig but are not exposed as CLI flags
 _SKIP_FIELDS = {
-    "codecs", "cli_text", "input_path", "output_path_override", "text_elements",
+    "codecs", "cli_text", "input_path", "output_path_override", "text_overlays",
     "model_config",
 }
 
@@ -141,7 +136,7 @@ def cmd_encode(args: argparse.Namespace) -> None:
     # ── Load + merge config ──────────────────────────────────────────────────
     user_yaml = load_user_config(Path(args.config) if args.config else None)
     codecs = load_codecs(Path(args.codecs) if args.codecs else None)
-    text_font, text_enable, text_elements = load_text_elements(Path(args.text_elements) if args.text_elements else None)
+    text_font, text_enable, text_overlays = load_text_overlays(Path(args.text_overlays) if args.text_overlays else None)
 
     cli_overrides: dict = {
         "input_path": Path(args.input),
@@ -168,7 +163,7 @@ def cmd_encode(args: argparse.Namespace) -> None:
     cli_overrides["set_overrides"] = set_overrides
 
     try:
-        config = build_config(user_yaml, codecs, text_elements, text_font, text_enable, cli_overrides=cli_overrides)
+        config = build_config(user_yaml, codecs, text_overlays, text_font, text_enable, cli_overrides=cli_overrides)
     except Exception as e:
         print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -200,46 +195,42 @@ def main() -> None:
         prog="daily",
         description="Convert EXR sequences to display-referred QuickTime movies.",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    # ── encode subcommand ────────────────────────────────────────────────────
-    enc = sub.add_parser("encode", help="Encode one or more EXR sequences")
-    enc.add_argument(
+    parser.add_argument(
         "-i", "--input", required=True, metavar="PATH",
-        help="Input EXR sequence: directory, single file, or pyseq pattern",
+        help="Input EXR sequence: directory, single file, or glob pattern (e.g. shots/**/*.exr)",
     )
-    enc.add_argument(
+    parser.add_argument(
         "-c", "--codec", metavar="NAME",
         help="Codec preset name (shorthand for --output-codec)",
     )
-    enc.add_argument(
+    parser.add_argument(
         "-o", "--output", metavar="PATH",
-        help="Output file (*.mov) or directory for named outputs",
+        help="Output file (*.mov) or directory; omit to write each video next to its source frames. Same-named sequences get a counter suffix (beauty_h264_hq.1.mov, .2.mov…)",
     )
-    enc.add_argument(
+    parser.add_argument(
         "--config", metavar="FILE",
         help="Path to daily.yaml (default: ./daily.yaml or bundled template)",
     )
-    enc.add_argument(
+    parser.add_argument(
         "--codecs", metavar="FILE",
         help="Path to codecs.yaml (default: bundled)",
     )
-    enc.add_argument(
-        "--text-elements", metavar="FILE",
-        help="Path to text_elements.yaml (default: ./text_elements.yaml or bundled)",
+    parser.add_argument(
+        "--text-overlays", metavar="FILE",
+        help="Path to text_overlays.yaml (default: ./text_overlays.yaml or bundled)",
     )
-    enc.add_argument(
+    parser.add_argument(
         "--text", action="append", metavar="KEY=VALUE",
         help="Custom text overlay value, repeatable (e.g. --text artist=Jane)",
     )
-    enc.add_argument(
+    parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Verbose logging",
     )
 
     # Auto-generate flags for every scalar field in DailyConfig
-    flag_map = _register_config_flags(enc, DailyConfig)
-    enc.set_defaults(func=cmd_encode, config_flag_map=flag_map)
+    flag_map = _register_config_flags(parser, DailyConfig)
+    parser.set_defaults(config_flag_map=flag_map)
 
     args = parser.parse_args()
 
@@ -251,7 +242,7 @@ def main() -> None:
     )
     logging.getLogger("PIL").setLevel(logging.WARNING)
 
-    args.func(args)
+    cmd_encode(args)
 
 
 if __name__ == "__main__":

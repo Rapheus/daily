@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob as _glob
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,10 @@ class SequenceInfo:
 _EXR_EXTS = {".exr"}
 
 
+def _is_glob(path_str: str) -> bool:
+    return any(c in path_str for c in ("*", "?", "["))
+
+
 def _seq_name(seq: pyseq.Sequence) -> str:
     head: str = seq.head() or ""
     return head.rstrip("._- ") or Path(seq[0].name).stem
@@ -52,10 +57,29 @@ def _build_sequence_info(seq: pyseq.Sequence) -> SequenceInfo:
 def discover_sequences(input_path: Path) -> list[SequenceInfo]:
     """Return all EXR sequences found at *input_path*.
 
-    - Directory  → scan for all EXR sequences inside it.
-    - File       → find the sequence that file belongs to.
-    - Non-existent path → treat as a pyseq pattern.
+    - Glob pattern  → expand recursively, group into sequences via pyseq.
+    - Directory     → scan for all EXR sequences inside it.
+    - File          → find the sequence that file belongs to.
     """
+    if _is_glob(str(input_path)):
+        matched = _glob.glob(str(input_path), recursive=True)
+        exr_files = [f for f in matched if f.lower().endswith(".exr")]
+        if not exr_files:
+            raise FileNotFoundError(f"No EXR files matched: {input_path}")
+        # Group by parent directory — pyseq groups by filename pattern only,
+        # so a flat list would merge same-named sequences from different directories.
+        by_dir: dict[str, list[str]] = {}
+        for f in exr_files:
+            key = str(Path(f).parent)
+            by_dir.setdefault(key, []).append(f)
+        all_seqs = []
+        for dir_files in by_dir.values():
+            raw = pyseq.get_sequences(dir_files)
+            all_seqs.extend(s for s in raw if _is_exr_seq(s) and len(s) > 0)
+        if not all_seqs:
+            raise FileNotFoundError(f"No EXR sequences matched: {input_path}")
+        return [_build_sequence_info(s) for s in all_seqs]
+
     if input_path.is_dir():
         raw = pyseq.get_sequences(str(input_path))
         seqs = [s for s in raw if _is_exr_seq(s) and len(s) > 0]
@@ -75,9 +99,4 @@ def discover_sequences(input_path: Path) -> list[SequenceInfo]:
             f"Could not find an EXR sequence containing {input_path}"
         )
 
-    # Treat as a pyseq glob / pattern
-    raw = pyseq.get_sequences(str(input_path.parent))
-    seqs = [s for s in raw if _is_exr_seq(s) and len(s) > 0]
-    if not seqs:
-        raise FileNotFoundError(f"No EXR sequences matched: {input_path}")
-    return [_build_sequence_info(s) for s in seqs]
+    raise FileNotFoundError(f"Path not found and not a glob pattern: {input_path}")

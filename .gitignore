@@ -10,9 +10,6 @@ dist/
 *.egg-info/
 .eggs/
 
-# Source repo (inspiration only, not part of this project)
-generate-dailies/
-
 # Editor / OS
 .vscode/
 .idea/
@@ -23,6 +20,4 @@ Thumbs.db
 # Logs / temp
 *.log
 *.mov
-to_implement.txt
-ARCHITECTURE.md
-MULTITHREADING.md
+design-document.md

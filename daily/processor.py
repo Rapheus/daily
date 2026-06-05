@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Protocol, TYPE_CHECKING
 
@@ -155,17 +156,6 @@ class CropmaskOp:
         return result
 
 
-class StaticTextOp:
-    """Composite a pre-built static text overlay (date, sequence_name, etc.)."""
-
-    def __init__(self, overlay):  # overlay: PIL.Image RGBA
-        self._overlay = overlay
-
-    def __call__(self, buf: np.ndarray, ctx: FrameContext) -> np.ndarray:
-        from .text import _composite_overlay
-        return _composite_overlay(buf, self._overlay)
-
-
 class FrameTextOp:
     """Render per-frame text (timecode, framecounter, filename, metadata.*)."""
 
@@ -194,16 +184,7 @@ class FrameProcessor:
 
     def process(self, frame_path: Path, ctx: FrameContext) -> np.ndarray:
         buf, metadata = read_exr(frame_path, trim_overscan=self._trim_overscan)
-        ctx = FrameContext(
-            frame_path=ctx.frame_path,
-            frame_number=ctx.frame_number,
-            frame_index=ctx.frame_index,
-            seq_start=ctx.seq_start,
-            seq_end=ctx.seq_end,
-            sequence_name=ctx.sequence_name,
-            exr_metadata=metadata,
-            filename=ctx.filename,
-        )
+        ctx = dataclasses.replace(ctx, exr_metadata=metadata)
         for op in self._ops:
             buf = op(buf, ctx)
         return buf
@@ -232,7 +213,7 @@ def build_ops(
         ops.append(CropmaskOp(config.cropmask.aspect, config.cropmask.opacity, tw, th))
 
     if config.text_enable:
-        enabled = [el for el in config.text_elements if el.enable]
+        enabled = [el for el in config.text_overlays if el.enable]
         if enabled:
             ops.append(FrameTextOp(renderer, resolver, enabled))
 

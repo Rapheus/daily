@@ -42,5 +42,5 @@ slate:
   fit: horizontal           # horizontal (fit width) | vertical (fit height)
 
 # ── Text overlays ─────────────────────────────────────────────────────────────
-# Controlled via text_elements.yaml (enable + font + element list).
+# Controlled via text_overlays.yaml (enable + font + element list).
 # Use --text-enable / --no-text-enable to override from CLI.
