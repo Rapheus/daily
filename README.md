@@ -5,6 +5,8 @@
 
 ![daily output — desert sunset shot with text overlays](.github/assets/screenshot.jpg)
 
+*Example footage © [L'Horda studio](https://lhorda-studio.com/en). Used with permission.*
+
 ---
 
 
