@@ -13,7 +13,7 @@
 
 ## Inspiration
 
-`daily` is a full rewrite of [jedypod's `generate-dailies`](https://github.com/jedypod/generate-dailies) with a narrower dependency footprint: no OpenImageIO, no compiled image libraries beyond the lean `OpenEXR` Python bindings.
+`daily` got inspiration from of [jedypod's `generate-dailies`](https://github.com/jedypod/generate-dailies) with a focus on minimal dependencies: no OpenImageIO, no compiled image libraries beyond the lean `OpenEXR` Python bindings.
 
 ---
 
