@@ -74,6 +74,17 @@ class OCIOProcessor:
                         display=tc.display,
                         view=tc.view,
                     )
+                    # Apply explicit look(s) on top of the display/view pipeline.
+                    # DisplayViewTransform alone only runs the look baked into the
+                    # view, so override it via the viewing pipeline when looks are
+                    # given.
+                    if tc.looks:
+                        vp = ocio.LegacyViewingPipeline()
+                        vp.setDisplayViewTransform(transform)
+                        vp.setLooksOverrideEnabled(True)
+                        vp.setLooksOverride(",".join(tc.looks))
+                        processor = vp.getProcessor(self._ocio_cfg)
+                        return processor.getDefaultCPUProcessor()
                 case "look":
                     transform = ocio.LookTransform(
                         src=tc.src,

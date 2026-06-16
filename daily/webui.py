@@ -39,6 +39,42 @@ def _with_all(choices: list, values: list) -> list:
     return [*choices, *extra]
 
 
+def _repo_root() -> Path:
+    """Repository root (the directory containing the ``daily`` package)."""
+    return Path(__file__).resolve().parent.parent
+
+
+def _posix(p: str | Path) -> str:
+    """Render a path with forward slashes for display in the web form."""
+    return Path(p).as_posix() if p else ""
+
+
+def _resolve_repo_relative(raw: str) -> str:
+    """Normalise a user-entered path to an absolute, forward-slash string.
+
+    - Empty / ``$VAR`` env refs are returned unchanged.
+    - Absolute paths (and ``~``) are honoured as-is.
+    - A relative path (e.g. ``./config/daily.yaml`` or ``config/daily.yaml``) is
+      resolved against the repository root, so ``./``-style paths work no matter
+      where daily-web was launched. It falls back to the launch directory only
+      when that's where the file actually exists.
+
+    Glob patterns are anchored on the repo root (their existence can't be
+    tested) but absolute globs pass straight through.
+    """
+    if not raw or raw.startswith("$"):
+        return raw
+    p = Path(raw).expanduser()
+    if p.is_absolute():
+        return p.as_posix()
+    is_glob = any(c in raw for c in "*?[")
+    repo_cand = _repo_root() / p
+    cwd_cand = Path.cwd() / p
+    if not is_glob and cwd_cand.exists() and not repo_cand.exists():
+        return cwd_cand.resolve().as_posix()
+    return repo_cand.resolve().as_posix()
+
+
 def _default_config_paths() -> dict[str, str]:
     """Absolute paths to the config files daily would load by default.
 
@@ -50,11 +86,11 @@ def _default_config_paths() -> dict[str, str]:
     def pick(local: str, bundled_name: str) -> str:
         p = Path(local)
         target = p if p.exists() else _bundled(bundled_name)
-        return str(target.resolve())
+        return target.resolve().as_posix()
 
     return {
         "daily": pick("daily.yaml", "config/daily.yaml"),
-        "codecs": str(_bundled("config/codecs.yaml").resolve()),
+        "codecs": _bundled("config/codecs.yaml").resolve().as_posix(),
         "text_overlays": pick("text_overlays.yaml", "config/text_overlays.yaml"),
     }
 
@@ -79,8 +115,13 @@ def _resolve_relative_to_yaml(raw: str, yaml_path: str | None) -> Path | None:
             cand = (base / p).resolve()
             if cand.exists():
                 return cand
-    cand = p.resolve()
-    return cand if cand.exists() else None
+    # Fall back to the repository root (so ``./``-relative paths work), then the
+    # launch directory.
+    for base in (_repo_root(), Path.cwd()):
+        cand = (base / p).resolve()
+        if cand.exists():
+            return cand
+    return None
 
 
 def _resolve_ocio(ocio_config: str, yaml_path: str | None = None) -> Path | None:
@@ -111,10 +152,10 @@ def _compute_form_defaults(
     input/output default to the launch directory.
     """
     paths = _default_config_paths()
-    eff_daily = str(Path(daily_path).resolve()) if daily_path else paths["daily"]
-    eff_codecs = str(Path(codecs_path).resolve()) if codecs_path else paths["codecs"]
+    eff_daily = _resolve_repo_relative(daily_path) if daily_path else paths["daily"]
+    eff_codecs = _resolve_repo_relative(codecs_path) if codecs_path else paths["codecs"]
     eff_text = (
-        str(Path(text_overlays_path).resolve()) if text_overlays_path else paths["text_overlays"]
+        _resolve_repo_relative(text_overlays_path) if text_overlays_path else paths["text_overlays"]
     )
 
     codec_choices = _codec_choices(eff_codecs)
@@ -137,15 +178,18 @@ def _compute_form_defaults(
     if cfg:
         p = _resolve_ocio(cfg.ocio.config, eff_daily)
         if p is not None:
-            ocio_config = str(p)
+            ocio_config = p.as_posix()
             ocio_opts = list_ocio_options(p)
 
     display = cfg.ocio.transform.display if cfg else ""
 
     # Input/output default to the launch directory (where daily-web was run).
+    # The input defaults to a recursive glob so every sequence under the launch
+    # directory's hierarchy is discovered.
     cwd = Path.cwd()
     out_dir = cfg.output.directory if cfg and cfg.output.directory else Path(".")
-    output = str(out_dir if out_dir.is_absolute() else (cwd / out_dir).resolve())
+    output = (out_dir if out_dir.is_absolute() else (cwd / out_dir)).resolve().as_posix()
+    input_default = cwd.as_posix().rstrip("/") + "/**"
 
     return {
         "eff_daily": eff_daily,
@@ -174,7 +218,7 @@ def _compute_form_defaults(
         "looks_all": ocio_opts["looks"],
         "slate_enable": cfg.slate.enable if cfg else False,
         "slate_path": (
-            str(cfg.slate.frame_path.resolve()) if cfg and cfg.slate.frame_path else ""
+            cfg.slate.frame_path.resolve().as_posix() if cfg and cfg.slate.frame_path else ""
         ),
         "slate_dur": cfg.slate.duration_frames if cfg else 24,
         "slate_fit": cfg.slate.fit if cfg else "horizontal",
@@ -183,16 +227,14 @@ def _compute_form_defaults(
         "crop_aspect": cfg.cropmask.aspect if cfg else 1.85,
         "crop_opacity": cfg.cropmask.opacity if cfg else 0.7,
         "text_enable": cfg.text_enable if cfg else True,
-        "input": str(cwd),
+        "input": input_default,
         "output": output,
     }
 
 
 def _build_set_overrides(
     ocio_config: str,
-    transform_type: str,
     transform_src: str,
-    transform_dst: str,
     transform_display: str,
     transform_view: str,
     transform_looks: list[str],
@@ -208,23 +250,20 @@ def _build_set_overrides(
 ) -> dict[str, Any]:
     ov: dict[str, Any] = {}
     if ocio_config:
-        ov["ocio.config"] = ocio_config
+        ov["ocio.config"] = _resolve_repo_relative(ocio_config)
     # Override the OCIO transform as one complete dict (rather than piecemeal
-    # dot-paths) so fields irrelevant to the selected type can't leak in from
-    # daily.yaml — e.g. a leftover display/view tripping the colorconvert
-    # validator. Only override when the user actually picked a source colourspace;
-    # otherwise fall back to daily.yaml's transform.
+    # dot-paths) so stale fields can't leak in from daily.yaml. The web UI always
+    # builds a source → display/view transform with optional look(s). Only
+    # override when the user actually picked a source colourspace; otherwise fall
+    # back to daily.yaml's transform.
     if transform_src:
-        transform: dict[str, Any] = {"type": transform_type, "src": transform_src}
-        if transform_type == "colorconvert":
-            transform["dst"] = transform_dst or None
-        elif transform_type == "display":
-            transform["display"] = transform_display or None
-            transform["view"] = transform_view or None
-        elif transform_type == "look":
-            transform["dst"] = transform_dst or None
-            transform["looks"] = list(transform_looks or [])
-        ov["ocio.transform"] = transform
+        ov["ocio.transform"] = {
+            "type": "display",
+            "src": transform_src,
+            "display": transform_display or None,
+            "view": transform_view or None,
+            "looks": list(transform_looks or []),
+        }
     ov["slate.enable"] = bool(slate_enable)
     if slate_duration_frames:
         ov["slate.duration_frames"] = int(slate_duration_frames)
@@ -253,9 +292,7 @@ def _preview(
     codecs_path: str,
     text_overlays_path: str,
     ocio_config: str,
-    transform_type: str,
     transform_src: str,
-    transform_dst: str,
     transform_display: str,
     transform_view: str,
     transform_looks: list[str],
@@ -271,10 +308,15 @@ def _preview(
 ) -> str:
     if not input_glob:
         return "Enter an input path or glob pattern first."
+    input_glob = _resolve_repo_relative(input_glob)
+    output_path = _resolve_repo_relative(output_path)
+    config_path = _resolve_repo_relative(config_path)
+    codecs_path = _resolve_repo_relative(codecs_path)
+    text_overlays_path = _resolve_repo_relative(text_overlays_path)
     try:
         seqs = discover_sequences(Path(input_glob))
         set_ov = _build_set_overrides(
-            ocio_config, transform_type, transform_src, transform_dst,
+            ocio_config, transform_src,
             transform_display, transform_view, transform_looks,
             slate_enable, slate_duration_frames, trim_overscan,
             framerate, resolution, threads,
@@ -318,8 +360,7 @@ def _load_ocio(config_path: str, daily_path: str = "") -> tuple:
     # Raising above leaves the existing dropdowns untouched, so a failed load
     # never strands a stale value against an empty choice list.
     return (
-        gr.update(value=str(p)),
-        gr.update(choices=cs),
+        gr.update(value=p.as_posix()),
         gr.update(choices=cs),
         gr.update(choices=displays, value=displays[0] if displays else None),
         gr.update(choices=looks),
@@ -327,18 +368,32 @@ def _load_ocio(config_path: str, daily_path: str = "") -> tuple:
     )
 
 
+def _browse_folder() -> Any:
+    """Open a native folder picker and return the chosen dir as a recursive glob.
+
+    The OS dialog runs on the machine hosting daily-web (the same machine, since
+    it opens a local browser). On cancel — or if no display/tk is available — the
+    field is left untouched.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        folder = filedialog.askdirectory()
+        root.destroy()
+    except Exception:
+        return gr.update()
+    if not folder:
+        return gr.update()
+    return gr.update(value=Path(folder).as_posix().rstrip("/") + "/**")
+
+
 def _update_views(display: str, views_state: dict) -> gr.update:
     views = (views_state or {}).get(display, [])
     return gr.update(choices=views, value=views[0] if views else None)
-
-
-def _show_transform_fields(transform_type: str) -> tuple:
-    return (
-        gr.update(visible=transform_type in ("colorconvert", "look")),  # dst
-        gr.update(visible=transform_type == "display"),                  # display
-        gr.update(visible=transform_type == "display"),                  # view
-        gr.update(visible=transform_type == "look"),                     # looks
-    )
 
 
 # Set by the Stop button, polled by run()'s should_stop hook. A single flag is
@@ -362,9 +417,7 @@ def _encode(
     text_enable: bool,
     verbose: bool,
     ocio_config: str,
-    transform_type: str,
     transform_src: str,
-    transform_dst: str,
     transform_display: str,
     transform_view: str,
     transform_looks: list[str],
@@ -385,6 +438,12 @@ def _encode(
     if not input_glob:
         raise gr.Error("Input path / glob is required.")
 
+    input_glob = _resolve_repo_relative(input_glob)
+    output_path = _resolve_repo_relative(output_path)
+    config_path = _resolve_repo_relative(config_path)
+    codecs_path = _resolve_repo_relative(codecs_path)
+    text_overlays_path = _resolve_repo_relative(text_overlays_path)
+
     cli_text: dict[str, str] = {}
     if text_kv is not None:
         rows = text_kv.values.tolist() if hasattr(text_kv, "values") else text_kv
@@ -393,14 +452,14 @@ def _encode(
                 cli_text[str(row[0])] = str(row[1])
 
     set_ov = _build_set_overrides(
-        ocio_config, transform_type, transform_src, transform_dst,
+        ocio_config, transform_src,
         transform_display, transform_view, transform_looks,
         slate_enable, slate_duration_frames, trim_overscan,
         framerate, resolution, threads,
         cropmask_enable, cropmask_aspect, cropmask_opacity,
     )
     if slate_frame_path:
-        set_ov["slate.frame_path"] = slate_frame_path
+        set_ov["slate.frame_path"] = _resolve_repo_relative(slate_frame_path)
     if slate_fit:
         set_ov["slate.fit"] = slate_fit
     set_ov["slate.ocio_transform"] = bool(slate_ocio_transform)
@@ -447,7 +506,7 @@ def create_app() -> gr.Blocks:
         gr.Markdown("# daily — EXR sequence encoder")
         _views_state = gr.State(d["views_map"])
 
-        with gr.Accordion("Config files", open=True):
+        with gr.Accordion("Config files", open=False):
             gr.Markdown(
                 "These YAML files determine the form defaults below. Edit a path "
                 "then click **Reload** to re-populate the form from it. Paths "
@@ -459,7 +518,6 @@ def create_app() -> gr.Blocks:
             text_overlays_path_in = gr.Textbox(
                 label="text_overlays.yaml path", value=cfg_paths["text_overlays"],
             )
-            verbose = gr.Checkbox(label="Verbose logging", value=False)
             reload_btn = gr.Button("Reload from config files")
 
         with gr.Accordion("Input / Output", open=True):
@@ -470,17 +528,13 @@ def create_app() -> gr.Blocks:
                     value=d["input"],
                     scale=4,
                 )
+                browse_btn = gr.Button("Browse folder…", scale=1)
                 preview_btn = gr.Button("Preview sequences", scale=1)
-            with gr.Row():
-                output_path = gr.Textbox(
-                    label="Output path or directory", value=d["output"], scale=3,
-                )
-                codec_dd = gr.Dropdown(
-                    label="Codec",
-                    choices=codec_choices,
-                    value=d["codec"] if d["codec"] in codec_choices else (codec_choices[0] if codec_choices else None),
-                    scale=1,
-                )
+            codec_dd = gr.Dropdown(
+                label="Codec",
+                choices=codec_choices,
+                value=d["codec"] if d["codec"] in codec_choices else (codec_choices[0] if codec_choices else None),
+            )
             with gr.Row():
                 resolution = gr.Textbox(
                     label="Resolution (WxH)", placeholder="1920x1080", value=d["resolution"],
@@ -499,38 +553,25 @@ def create_app() -> gr.Blocks:
                     scale=4,
                 )
                 load_ocio_btn = gr.Button("Load config", scale=1)
-            transform_type = gr.Dropdown(
-                label="Transform type",
-                choices=["colorconvert", "display", "look"],
-                value=d["type"],
-            )
             transform_src = gr.Dropdown(
                 label="Source colourspace",
                 choices=_with(d["cs"], d["src"]), value=d["src"] or None,
                 allow_custom_value=True,
             )
-            transform_dst = gr.Dropdown(
-                label="Destination colourspace",
-                choices=_with(d["cs"], d["dst"]), value=d["dst"] or None,
-                visible=d["type"] in ("colorconvert", "look"),
-                allow_custom_value=True,
-            )
             transform_display = gr.Dropdown(
                 label="Display",
                 choices=_with(d["displays"], d["display"]), value=d["display"] or None,
-                visible=d["type"] == "display",
                 allow_custom_value=True,
             )
             transform_view = gr.Dropdown(
                 label="View",
                 choices=_with(d["views_for_display"], d["view"]), value=d["view"] or None,
-                visible=d["type"] == "display",
                 allow_custom_value=True,
             )
             transform_looks = gr.Dropdown(
-                label="Looks",
+                label="Look",
                 choices=_with_all(d["looks_all"], d["looks"]), value=d["looks"],
-                multiselect=True, visible=d["type"] == "look",
+                multiselect=True,
                 allow_custom_value=True,
             )
 
@@ -567,6 +608,8 @@ def create_app() -> gr.Blocks:
                 col_count=(2, "fixed"),
             )
 
+        output_path = gr.Textbox(label="Output path or directory", value=d["output"])
+        verbose = gr.Checkbox(label="Verbose logging", value=False)
         with gr.Row():
             run_btn = gr.Button("Encode", variant="primary", scale=4)
             stop_btn = gr.Button("Stop", variant="stop", scale=1)
@@ -575,7 +618,7 @@ def create_app() -> gr.Blocks:
         # Inputs shared between preview and encode (the set_overrides block)
         _set_ov_inputs = [
             ocio_config_path,
-            transform_type, transform_src, transform_dst,
+            transform_src,
             transform_display, transform_view, transform_looks,
             slate_enable, slate_duration,
             trim_overscan, framerate, resolution, threads,
@@ -597,23 +640,15 @@ def create_app() -> gr.Blocks:
                 gr.update(value=r["threads"]),
                 gr.update(value=r["trim"]),
                 gr.update(value=r["ocio_config"]),
-                gr.update(value=r["type"]),
                 gr.update(choices=_with(r["cs"], r["src"]), value=r["src"] or None),
                 gr.update(
-                    choices=_with(r["cs"], r["dst"]), value=r["dst"] or None,
-                    visible=r["type"] in ("colorconvert", "look"),
-                ),
-                gr.update(
                     choices=_with(r["displays"], r["display"]), value=r["display"] or None,
-                    visible=r["type"] == "display",
                 ),
                 gr.update(
                     choices=_with(r["views_for_display"], r["view"]), value=r["view"] or None,
-                    visible=r["type"] == "display",
                 ),
                 gr.update(
                     choices=_with_all(r["looks_all"], r["looks"]), value=r["looks"],
-                    visible=r["type"] == "look",
                 ),
                 gr.update(value=r["slate_enable"]),
                 gr.update(value=r["slate_path"]),
@@ -632,13 +667,15 @@ def create_app() -> gr.Blocks:
             inputs=[config_path_in, codecs_path_in, text_overlays_path_in],
             outputs=[
                 input_glob, output_path, codec_dd, resolution, framerate, threads,
-                trim_overscan, ocio_config_path, transform_type, transform_src,
-                transform_dst, transform_display, transform_view, transform_looks,
+                trim_overscan, ocio_config_path, transform_src,
+                transform_display, transform_view, transform_looks,
                 slate_enable, slate_frame_path, slate_duration, slate_fit,
                 slate_ocio_transform, cropmask_enable, cropmask_aspect,
                 cropmask_opacity, text_enable, _views_state,
             ],
         )
+
+        browse_btn.click(fn=_browse_folder, outputs=[input_glob])
 
         preview_btn.click(
             fn=_preview,
@@ -653,7 +690,7 @@ def create_app() -> gr.Blocks:
             fn=_load_ocio,
             inputs=[ocio_config_path, config_path_in],
             outputs=[
-                ocio_config_path, transform_src, transform_dst,
+                ocio_config_path, transform_src,
                 transform_display, transform_looks, _views_state,
             ],
         )
@@ -662,12 +699,6 @@ def create_app() -> gr.Blocks:
             fn=_update_views,
             inputs=[transform_display, _views_state],
             outputs=[transform_view],
-        )
-
-        transform_type.change(
-            fn=_show_transform_fields,
-            inputs=[transform_type],
-            outputs=[transform_dst, transform_display, transform_view, transform_looks],
         )
 
         run_btn.click(
