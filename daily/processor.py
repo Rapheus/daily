@@ -196,13 +196,8 @@ def build_ops(
     renderer: TextRenderer,
     resolver: TextContentResolver,
     resolution: tuple[int, int],
-    seq_ctx: FrameContext | None = None,
 ) -> list[ImageOp]:
-    """Assemble the fixed-order op list from config.
-
-    seq_ctx should be a FrameContext populated with real sequence bounds so that
-    static text elements (framerange, sequence_name, date) render correct values.
-    """
+    """Assemble the fixed-order op list from config."""
     tw, th = resolution
     ops: list[ImageOp] = []
 

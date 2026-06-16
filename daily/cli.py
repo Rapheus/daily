@@ -101,7 +101,7 @@ def _register_config_flags(
 
         if isinstance(ann, type) and issubclass(ann, BaseModel):
             mapping += _register_config_flags(parser, ann, prefix=flag + "-", dot_prefix=dot)
-        elif origin is Union:
+        elif _is_union(origin):
             inner = [a for a in get_args(ann) if a is not type(None)]
             if (
                 len(inner) == 1
@@ -199,7 +199,7 @@ def main() -> None:
     )
     parser.add_argument(
         "-o", "--output", metavar="PATH",
-        help="Output file (*.mov) or directory; omit to write each video next to its source frames. Same-named sequences get a counter suffix (beauty_h264_hq.1.mov, .2.mov…)",
+        help="Output file (*.mov) or directory; omit to write each video next to its source frames. Same-named sequences get a counter suffix (beauty_h264_hq.mov, beauty_h264_hq-01.mov, …)",
     )
     parser.add_argument(
         "--config", metavar="FILE",

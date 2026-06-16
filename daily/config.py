@@ -147,7 +147,7 @@ def resolve_ocio_path(config: DailyConfig) -> Path:
     """Resolve OCIO config path: literal path → $OCIO env var → error."""
     raw = config.ocio.config
     if raw.startswith("$"):
-        env_var = raw.lstrip("$")
+        env_var = raw[1:]
         value = os.environ.get(env_var)
         if not value:
             raise RuntimeError(

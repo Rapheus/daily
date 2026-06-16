@@ -21,7 +21,10 @@ Thumbs.db
 # Logs / temp
 *.log
 *.mov
-design-document.md
+
+# Local-only docs
+CLAUDE.md
+ARCHITECTURE.md
 
 # Example output
 example/output/*

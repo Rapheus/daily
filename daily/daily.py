@@ -139,17 +139,7 @@ def run(
         start_tc = tc_helper.tc_from_frame(tc_start)
         end_tc = tc_helper.tc_from_frame(seq.end)
 
-        seq_ctx = FrameContext(
-            frame_path=seq.frames[0].path,
-            frame_number=seq.start,
-            frame_index=0,
-            seq_start=seq.start,
-            seq_end=seq.end,
-            sequence_name=seq.name,
-            exr_metadata={},
-            filename=seq.frames[0].path.name,
-        )
-        ops = build_ops(config, ocio, renderer, resolver, (width, height), seq_ctx=seq_ctx)
+        ops = build_ops(config, ocio, renderer, resolver, (width, height))
         processor = FrameProcessor(ops, trim_overscan=trim_overscan)
         log.info(
             f"  {seq.frames[0].path}  frames {seq.start}-{seq.end} "

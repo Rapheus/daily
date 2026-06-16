@@ -61,11 +61,6 @@ class TextContentResolver:
             case _:
                 return self._cli.get(content, default)
 
-    @staticmethod
-    def is_static(content: str) -> bool:
-        """True if the content value does not change between frames."""
-        return content in {"framerange", "time_of_day", "date", "sequence_name"}
-
 
 # ── Renderer ──────────────────────────────────────────────────────────────────
 
