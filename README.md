@@ -62,6 +62,9 @@ source .venv/bin/activate
 
 # 2. Install daily and its dependencies
 pip install .
+
+# Optional: install the web UI extra (adds the `daily-web` command)
+pip install ".[web]"
 ```
 
 ---
@@ -76,6 +79,28 @@ A self-contained example lives in `example/` — EXR sequence, OCIO config, and 
 ```bash
 daily -i example/input/**/*.exr -o example/output/ --slate-enable --text user="Raphael" --text description="comp v003"
 ```
+
+---
+
+
+
+
+## Web UI
+
+`daily` ships an optional Gradio web UI that exposes everything the CLI does, with **dropdowns for OCIO colourspaces, displays, views, and looks** (populated from your `.ocio` config) instead of free-text strings.
+
+```bash
+pip install ".[web]"
+daily-web
+```
+
+This launches a local server and prints a URL (e.g. `http://127.0.0.1:7860`) — open it in your browser.
+
+The UI runs **locally** and reads paths directly from the local filesystem; nothing is uploaded. Key features:
+
+- **Preview sequences** — point it at an input path or glob and preview the matched sequences, their frame counts, and the expected output paths *before* encoding.
+- **OCIO dropdowns** — enter your OCIO config path, click **Load config**, and pick colourspaces / displays / views / looks from dropdowns. The view list updates automatically when you change the display.
+- **Live progress** — the progress bar shows which sequence is currently encoding; encodes are queued (run sequentially), never concurrently.
 
 ---
 

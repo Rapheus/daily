@@ -47,6 +47,7 @@ class FFmpegEncoder:
         self._start_timecode = start_timecode
         self._verbose = verbose
         self._proc: subprocess.Popen | None = None
+        self._aborted = False
 
     def _build_cmd(self) -> list[str]:
         cmd = [
@@ -91,6 +92,16 @@ class FFmpegEncoder:
         except BrokenPipeError:
             raise EncoderError("ffmpeg pipe broken — re-run with -v for details") from None
 
+    def abort(self) -> None:
+        """Forcibly kill ffmpeg, discarding any buffered frames.
+
+        Used to cancel an in-progress encode. After this, __exit__ skips the
+        normal finalize/return-code check.
+        """
+        self._aborted = True
+        if self._proc is not None:
+            self._proc.kill()
+
     def __exit__(
         self,
         exc_type: type | None,
@@ -104,6 +115,11 @@ class FFmpegEncoder:
         except OSError:
             pass
         self._proc.wait()
+
+        # A killed encode has a non-zero return code by design — don't treat it
+        # as a failure.
+        if self._aborted:
+            return
 
         if exc_type is None and self._proc.returncode != 0:
             raise EncoderError(

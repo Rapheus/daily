@@ -21,10 +21,19 @@ dependencies = [
 
 [project.optional-dependencies]
 tui = ["textual>=0.50.0"]
+web = ["gradio>=4.0"]
 
 [project.scripts]
 daily = "daily.cli:main"
+daily-web = "daily.webui:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["daily"]
+
+# Ship the bundled YAML configs and fonts alongside the package. They install to
+# site-packages/config and site-packages/fonts, which is where config._bundled()
+# (Path(__file__).parent.parent / name) looks them up in a non-editable install.
+[tool.hatch.build.targets.wheel.force-include]
+"config" = "config"
+"fonts" = "fonts"
 

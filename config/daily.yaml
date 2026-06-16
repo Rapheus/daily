@@ -10,7 +10,7 @@ ffmpeg: null
 # ── OCIO ──────────────────────────────────────────────────────────────────────
 # Priority: --ocio flag  →  config below  →  $OCIO env var  →  error
 ocio:
-  config: "example/ocio/studio-config.ocio"
+  config: "ocio/studio-config.ocio"
   transform:
     type: display           # colorconvert | display | look
     src: "ACES - ACEScg"
@@ -37,11 +37,8 @@ cropmask:
 # ── Slate ─────────────────────────────────────────────────────────────────────
 slate:
   enable: false
-  frame_path: null          # null = use bundled slate/slate_frame.png; or path to custom image
+  frame_path: "slate/slate_frame.png"          # path to slate image (relative to this file); null = blank slate
   duration_frames: 1        # number of frames to hold the slate
   fit: horizontal           # horizontal (fit width) | vertical (fit height)
   ocio_transform: false     # set true when frame_path is a linear EXR (applies the same colour pipeline)
 
-# ── Text overlays ─────────────────────────────────────────────────────────────
-# Controlled via text_overlays.yaml (enable + font + element list).
-# Use --text-enable / --no-text-enable to override from CLI.

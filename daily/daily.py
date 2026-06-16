@@ -19,7 +19,7 @@ from .timecode import TimecodeHelper
 
 log = logging.getLogger(__name__)
 
-ProgressCallback = Callable[[int, int], None]  # (completed_frames, total_frames)
+ProgressCallback = Callable[..., None]  # (done: int, total: int, desc: str | None = None)
 
 
 def _black_frame(width: int, height: int) -> np.ndarray:
@@ -55,15 +55,33 @@ def _deduplicate_paths(paths: list[Path]) -> list[Path]:
     return result
 
 
+def compute_output_paths(config: DailyConfig, sequences: list[SequenceInfo]) -> list[Path]:
+    """Return the output path for each sequence, deduplicating collisions.
+
+    Mirrors the path logic in run() so the web UI can show expected output
+    paths in a preview without actually encoding.
+    """
+    override = config.output_path_override
+    is_fixed_file = (
+        override is not None
+        and override.suffix.lower() in {".mov", ".mp4", ".mxf", ".mkv"}
+    )
+    raw = [_output_path(seq, config) for seq in sequences]
+    return raw if is_fixed_file else _deduplicate_paths(raw)
+
+
 def run(
     config: DailyConfig,
     progress_cb: ProgressCallback | None = None,
     verbose: bool = False,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[Path]:
     """Encode all sequences described by config.
 
     progress_cb receives (completed_frames, total_frames) after each frame.
-    Returns the list of output file paths that were produced.
+    should_stop, if given, is polled between frames; when it returns True the
+    ffmpeg process is killed, the partial output is removed, and the run ends.
+    Returns the list of output file paths that were fully produced.
     """
     if config.input_path is None:
         raise ValueError("config.input_path must be set before calling run()")
@@ -81,16 +99,28 @@ def run(
     sequences = discover_sequences(config.input_path)
     log.info(f"Found {len(sequences)} sequence(s) at {config.input_path}")
 
-    override = config.output_path_override
-    is_fixed_file = (
-        override is not None
-        and override.suffix.lower() in {".mov", ".mp4", ".mxf", ".mkv"}
-    )
-    raw_paths = [_output_path(seq, config) for seq in sequences]
-    out_paths = raw_paths if is_fixed_file else _deduplicate_paths(raw_paths)
+    out_paths = compute_output_paths(config, sequences)
+
+    # Overall progress across every sequence (and slate frames), so the bar
+    # advances smoothly to 100% for the whole run instead of resetting per
+    # sequence. slate frames are counted because they are written to ffmpeg too.
+    slate_n = config.slate.duration_frames if config.slate.enable else 0
+    grand_total = sum(len(seq) + slate_n for seq in sequences)
+    done = 0
+    completed: list[Path] = []
+    stopped = False
+
+    def _stop_requested() -> bool:
+        return should_stop is not None and should_stop()
 
     for seq, out in zip(sequences, out_paths):
+        if _stop_requested():
+            stopped = True
+            break
+
         out.parent.mkdir(parents=True, exist_ok=True)
+        if progress_cb:
+            progress_cb(done, grand_total, f"Encoding: {seq.name}")
 
         # Resolve output resolution: explicit config value or source EXR size
         if config.output.resolution is not None:
@@ -122,7 +152,7 @@ def run(
         ops = build_ops(config, ocio, renderer, resolver, (width, height), seq_ctx=seq_ctx)
         processor = FrameProcessor(ops, trim_overscan=trim_overscan)
         log.info(
-            f"  {seq.name}  frames {seq.start}-{seq.end} "
+            f"  {seq.frames[0].path}  frames {seq.start}-{seq.end} "
             f"({len(seq)} frames)  {start_tc} - {end_tc}"
         )
         log.info(f"  -> {out}")
@@ -150,37 +180,74 @@ def run(
                     ocio_processor=ocio if config.slate.ocio_transform else None,
                 )
                 for _ in range(config.slate.duration_frames):
+                    if _stop_requested():
+                        enc.abort()
+                        stopped = True
+                        break
                     enc.write_frame(slate_frame)
+                    done += 1
+                    if progress_cb:
+                        progress_cb(done, grand_total)
 
-            if config.output.threads <= 1:
+            if not stopped and config.output.threads <= 1:
                 for frame in seq.frames:
+                    if _stop_requested():
+                        enc.abort()
+                        stopped = True
+                        break
                     try:
                         buf = processor.process(frame.path, _make_ctx(frame))
                         enc.write_frame(buf)
                     except FrameReadError as e:
                         log.warning(str(e))
                         enc.write_frame(_black_frame(width, height))
+                    done += 1
                     if progress_cb:
-                        progress_cb(frame.index + 1, len(seq))
-            else:
+                        progress_cb(done, grand_total)
+            elif not stopped:
                 chunk_size = config.output.threads * 2
                 with ThreadPoolExecutor(max_workers=config.output.threads) as pool:
                     for chunk_start in range(0, len(seq.frames), chunk_size):
+                        if _stop_requested():
+                            enc.abort()
+                            stopped = True
+                            break
                         chunk = seq.frames[chunk_start : chunk_start + chunk_size]
                         futures = [
                             pool.submit(processor.process, f.path, _make_ctx(f))
                             for f in chunk
                         ]
                         for frame, future in zip(chunk, futures):
+                            if _stop_requested():
+                                enc.abort()
+                                stopped = True
+                                break
                             try:
                                 buf = future.result()
                             except FrameReadError as e:
                                 log.warning(str(e))
                                 buf = _black_frame(width, height)
                             enc.write_frame(buf)
+                            done += 1
                             if progress_cb:
-                                progress_cb(frame.index + 1, len(seq))
+                                progress_cb(done, grand_total)
+                        if stopped:
+                            break
 
+        if stopped:
+            # The killed encoder leaves a truncated, unusable file behind.
+            try:
+                if out.exists():
+                    out.unlink()
+            except OSError:
+                pass
+            log.info("  stopped")
+            break
+
+        completed.append(out)
         log.info("  done")
 
-    return out_paths
+    if stopped:
+        log.info("Encode stopped by request")
+
+    return completed

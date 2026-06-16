@@ -12,6 +12,37 @@ class ColorError(Exception):
     pass
 
 
+def list_ocio_options(config_path: Path) -> dict:
+    """Enumerate the colourspaces, displays, views, and looks in an OCIO config.
+
+    Returns a dict with keys ``colorspaces`` (list[str]), ``displays`` (list[str]),
+    ``views`` (dict mapping each display name to its list of view names), and
+    ``looks`` (list[str]). On any failure (missing or invalid config) every value
+    is empty so callers — e.g. the web UI dropdowns — can degrade gracefully
+    instead of crashing.
+    """
+    empty: dict = {"colorspaces": [], "displays": [], "views": {}, "looks": []}
+    try:
+        cfg = ocio.Config.CreateFromFile(str(config_path))
+    except Exception:
+        return empty
+
+    try:
+        colorspaces = list(cfg.getColorSpaceNames())
+        displays = list(cfg.getDisplays())
+        views = {d: list(cfg.getViews(d)) for d in displays}
+        looks = [look.getName() for look in cfg.getLooks()]
+    except Exception:
+        return empty
+
+    return {
+        "colorspaces": colorspaces,
+        "displays": displays,
+        "views": views,
+        "looks": looks,
+    }
+
+
 class OCIOProcessor:
     """Applies an OCIO color transform to float32 numpy arrays (H, W, 3).
 

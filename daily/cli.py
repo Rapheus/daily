@@ -36,7 +36,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from .config import DailyConfig, _coerce, build_config, load_codecs, load_text_overlays, load_user_config
+from .config import DailyConfig, build_daily_config
 
 # Fields that exist on DailyConfig but are not exposed as CLI flags
 _SKIP_FIELDS = {
@@ -135,36 +135,24 @@ def cmd_encode(args: argparse.Namespace, console: Console) -> None:
     from . import daily
 
     # ── Load + merge config ──────────────────────────────────────────────────
-    user_yaml = load_user_config(Path(args.config) if args.config else None)
-    codecs = load_codecs(Path(args.codecs) if args.codecs else None)
-    text_font, text_enable, text_overlays = load_text_overlays(Path(args.text_overlays) if args.text_overlays else None)
-
-    cli_overrides: dict = {
-        "input_path": Path(args.input),
-        "cli_text": _parse_text_args(args.text),
-    }
-
-    if args.codec:
-        cli_overrides["codec"] = args.codec
-
-    # Output path / directory
-    if args.output:
-        out = Path(args.output)
-        if out.suffix.lower() in {".mov", ".mp4", ".mxf", ".mkv"}:
-            cli_overrides["output_path_override"] = out
-        else:
-            cli_overrides["output_dir"] = out
-
-    # Collect auto-generated config flag overrides
+    # Collect auto-generated config flag overrides (dot-path → value)
     set_overrides: dict[str, Any] = {}
     for attr, dot_path in args.config_flag_map:
         val = getattr(args, attr, None)
         if val is not None:
-            set_overrides[dot_path] = val if isinstance(val, bool) else _coerce(str(val))
-    cli_overrides["set_overrides"] = set_overrides
+            set_overrides[dot_path] = val
 
     try:
-        config = build_config(user_yaml, codecs, text_overlays, text_font, text_enable, cli_overrides=cli_overrides)
+        config = build_daily_config(
+            input_path=args.input,
+            output=args.output,
+            codec=args.codec,
+            text=_parse_text_args(args.text),
+            set_overrides=set_overrides,
+            config_path=Path(args.config) if args.config else None,
+            codecs_path=Path(args.codecs) if args.codecs else None,
+            text_overlays_path=Path(args.text_overlays) if args.text_overlays else None,
+        )
     except Exception as e:
         print(f"Config error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -182,8 +170,9 @@ def cmd_encode(args: argparse.Namespace, console: Console) -> None:
     ) as progress:
         task = progress.add_task("Encoding", total=None)
 
-        def on_progress(done: int, total: int) -> None:
-            progress.update(task, completed=done, total=total)
+        def on_progress(done: int, total: int, desc: str | None = None) -> None:
+            progress.update(task, completed=done, total=total,
+                            description=desc or "Encoding")
 
         try:
             out_paths = daily.run(config, progress_cb=on_progress, verbose=args.verbose)

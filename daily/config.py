@@ -55,6 +55,15 @@ class OutputConfig(BaseModel):
     trim_overscan: bool = True
     threads: int = Field(default_factory=lambda: os.cpu_count() or 1)
 
+    @field_validator("framerate", mode="before")
+    @classmethod
+    def _framerate_to_str(cls, v: Any) -> Any:
+        # Numeric overrides (e.g. CLI --output-framerate 25, or the web form)
+        # arrive as int/float after coercion; framerate is stored as a string.
+        if isinstance(v, (int, float)):
+            return str(v)
+        return v
+
 
 # ── Cropmask ──────────────────────────────────────────────────────────────────
 
@@ -191,15 +200,47 @@ def load_codecs(path: Path | None = None) -> dict[str, CodecPreset]:
     return {key: CodecPreset(name=key, **val) for key, val in raw.items()}
 
 
-def load_user_config(path: Path | None = None) -> dict[str, Any]:
-    """Load daily.yaml, preferring cwd → bundled default."""
+def user_config_path(path: Path | None = None) -> Path:
+    """Resolve which daily.yaml load_user_config would read: explicit → cwd → bundled."""
     if path is not None:
-        return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return path
     cwd_cfg = Path("daily.yaml")
     if cwd_cfg.exists():
-        return yaml.safe_load(cwd_cfg.read_text(encoding="utf-8")) or {}
-    bundled = _bundled("config/daily.yaml")
-    return yaml.safe_load(bundled.read_text(encoding="utf-8")) or {}
+        return cwd_cfg
+    return _bundled("config/daily.yaml")
+
+
+def load_user_config(path: Path | None = None) -> dict[str, Any]:
+    """Load daily.yaml, preferring cwd → bundled default."""
+    cfg_path = user_config_path(path)
+    return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+
+
+def text_overlays_path(path: Path | None = None) -> Path:
+    """Resolve which text_overlays.yaml is used: explicit → cwd → bundled."""
+    if path is not None:
+        return path
+    cwd_cfg = Path("text_overlays.yaml")
+    if cwd_cfg.exists():
+        return cwd_cfg
+    return _bundled("config/text_overlays.yaml")
+
+
+def _resolve_font(raw: Any, yaml_dir: Path) -> Path | None:
+    """Resolve a font reference from text_overlays.yaml.
+
+    - bare filename ("Vera.ttf")        → bundled fonts dir (package resource)
+    - relative path ("subdir/Foo.ttf")  → relative to the text_overlays.yaml
+    - absolute path                     → used as-is
+    """
+    if not raw:
+        return None
+    p = Path(raw)
+    if p.is_absolute():
+        return p
+    if str(p) == p.name:
+        return _bundled("fonts") / p.name
+    return Path(_resolve_yaml_path(str(p), yaml_dir))
 
 
 def load_text_overlays(
@@ -212,33 +253,33 @@ def load_text_overlays(
     - enable: bool from the yaml 'enable' key, or None if not specified.
     - elements: list of raw element dicts.
 
-    A bare font filename (e.g. "Vera.ttf") is resolved against the bundled fonts dir.
+    Font references are resolved relative to the text_overlays.yaml location (a
+    bare filename resolves to the bundled fonts dir), so they don't depend on
+    the working directory.
     """
-    if path is not None:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    else:
-        cwd_cfg = Path("text_overlays.yaml")
-        if cwd_cfg.exists():
-            raw = yaml.safe_load(cwd_cfg.read_text(encoding="utf-8")) or {}
-        else:
-            bundled = _bundled("config/text_overlays.yaml")
-            raw = yaml.safe_load(bundled.read_text(encoding="utf-8")) or {}
+    cfg_path = text_overlays_path(path)
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    yaml_dir = cfg_path.resolve().parent
 
     if isinstance(raw, list):
-        return None, None, raw
+        elements = raw
+        return None, None, _resolve_element_fonts(elements, yaml_dir)
 
-    font_raw = raw.get("font")
-    font: Path | None = None
-    if font_raw:
-        candidate = Path(font_raw)
-        if not candidate.is_absolute() and str(candidate) == candidate.name:
-            # Bare filename — resolve against bundled fonts dir
-            candidate = Path(str(_bundled("fonts") / candidate.name))
-        font = candidate
-
+    font = _resolve_font(raw.get("font"), yaml_dir)
     enable: bool | None = raw.get("enable")
+    elements = _resolve_element_fonts(raw.get("elements", []), yaml_dir)
 
-    return font, enable, raw.get("elements", [])
+    return font, enable, elements
+
+
+def _resolve_element_fonts(elements: list[Any], yaml_dir: Path) -> list[Any]:
+    """Resolve any per-element 'font' override relative to the yaml location."""
+    for el in elements:
+        if isinstance(el, dict) and el.get("font"):
+            resolved = _resolve_font(el["font"], yaml_dir)
+            if resolved is not None:
+                el["font"] = str(resolved)
+    return elements
 
 
 def _coerce(value: str) -> Any:
@@ -262,6 +303,28 @@ def _apply_dotpath(data: dict, key: str, value: Any) -> None:
     d[parts[-1]] = value
 
 
+def _resolve_yaml_path(raw: Any, config_dir: Path, *, allow_env: bool = False) -> Any:
+    """Resolve a relative path *relative to the daily.yaml location*.
+
+    Anchoring on the config file (and its parent, so a config in ``config/`` can
+    reference sibling dirs like ``example/``) makes paths independent of where
+    the tool was launched. Absolute paths, env refs (``$OCIO``), and paths that
+    don't resolve are returned unchanged so existing behaviour/validation stands.
+    """
+    if not isinstance(raw, str) or not raw:
+        return raw
+    if allow_env and raw.startswith("$"):
+        return raw
+    p = Path(raw)
+    if p.is_absolute():
+        return raw
+    for base in (config_dir, config_dir.parent):
+        cand = base / p
+        if cand.exists():
+            return str(cand.resolve())
+    return raw
+
+
 def build_config(
     user_yaml: dict[str, Any],
     codecs: dict[str, CodecPreset],
@@ -270,8 +333,13 @@ def build_config(
     text_enable: bool | None = None,
     *,
     cli_overrides: dict[str, Any] | None = None,
+    config_dir: Path | None = None,
 ) -> DailyConfig:
-    """Merge yaml + CLI overrides into a validated DailyConfig."""
+    """Merge yaml + CLI overrides into a validated DailyConfig.
+
+    config_dir, when given, is the directory of the daily.yaml; relative
+    slate/OCIO paths are resolved against it so they work regardless of cwd.
+    """
     data = dict(user_yaml)
     if text_overlays is not None:
         data["text_overlays"] = text_overlays
@@ -291,6 +359,16 @@ def build_config(
     if "output_dir" in overrides:
         _apply_dotpath(data, "output.directory", str(overrides["output_dir"]))
 
+    # Resolve relative slate/OCIO paths against the daily.yaml location so they
+    # don't depend on the working directory.
+    if config_dir is not None:
+        slate = data.get("slate")
+        if isinstance(slate, dict) and slate.get("frame_path"):
+            slate["frame_path"] = _resolve_yaml_path(slate["frame_path"], config_dir)
+        ocio = data.get("ocio")
+        if isinstance(ocio, dict) and ocio.get("config"):
+            ocio["config"] = _resolve_yaml_path(ocio["config"], config_dir, allow_env=True)
+
     cfg = DailyConfig.model_validate(data)
     # Inject non-yaml fields
     object.__setattr__(cfg, "codecs", codecs)
@@ -305,3 +383,67 @@ def build_config(
             f"Codec '{cfg.output.codec}' not in codecs.yaml. Available: {available}"
         )
     return cfg
+
+
+# Video container extensions that mark an --output value as a file (not a directory)
+_VIDEO_SUFFIXES = {".mov", ".mp4", ".mxf", ".mkv"}
+
+
+def build_daily_config(
+    *,
+    input_path: str | Path,
+    output: str | Path | None = None,
+    codec: str | None = None,
+    text: dict[str, str] | None = None,
+    set_overrides: dict[str, Any] | None = None,
+    config_path: Path | None = None,
+    codecs_path: Path | None = None,
+    text_overlays_path: Path | None = None,
+) -> DailyConfig:
+    """Load the YAML config files, merge overrides, and return a DailyConfig.
+
+    Shared by the CLI (``cmd_encode``) and the web UI so both build configs the
+    same way.
+
+    - ``input_path``: EXR directory, single file, or glob pattern.
+    - ``output``: a *.mov/.mp4/.mxf/.mkv path is treated as a fixed output file;
+      anything else is treated as an output directory. ``None`` writes next to
+      the source frames.
+    - ``codec``: shorthand for ``output.codec`` (overrides set_overrides if given).
+    - ``text``: custom ``--text key=value`` overlay values.
+    - ``set_overrides``: dot-path → value overrides (e.g. ``ocio.transform.src``).
+      Non-bool values are coerced via :func:`_coerce`.
+    """
+    user_yaml = load_user_config(config_path)
+    codecs = load_codecs(codecs_path)
+    text_font, text_enable, text_overlays = load_text_overlays(text_overlays_path)
+    config_dir = user_config_path(config_path).resolve().parent
+
+    cli_overrides: dict[str, Any] = {
+        "input_path": Path(input_path),
+        "cli_text": dict(text or {}),
+    }
+
+    if codec:
+        cli_overrides["codec"] = codec
+
+    if output:
+        out = Path(output)
+        if out.suffix.lower() in _VIDEO_SUFFIXES:
+            cli_overrides["output_path_override"] = out
+        else:
+            cli_overrides["output_dir"] = out
+
+    coerced: dict[str, Any] = {}
+    for dot_path, val in (set_overrides or {}).items():
+        if val is None:
+            continue
+        # Strings from CLI flags get best-effort coercion; richer values from
+        # the web UI (bool, int, float, list/tuple) pass through unchanged.
+        coerced[dot_path] = _coerce(val) if isinstance(val, str) else val
+    cli_overrides["set_overrides"] = coerced
+
+    return build_config(
+        user_yaml, codecs, text_overlays, text_font, text_enable,
+        cli_overrides=cli_overrides, config_dir=config_dir,
+    )

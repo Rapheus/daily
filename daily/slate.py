@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -12,16 +11,14 @@ if TYPE_CHECKING:
     from .color import OCIOProcessor
     from .config import SlateConfig
 
-_BUNDLED_FRAME = Path(__file__).parent.parent / "example" / "slate" / "slate_frame.png"
-
-
 class SlateGenerator:
     """Fits a slate image frame onto the output canvas.
 
     fit="horizontal": scale so width matches canvas; black bars top/bottom if needed.
     fit="vertical":   scale so height matches canvas; black bars left/right if needed.
 
-    When frame_path is None the bundled slate_frame.png (sRGB) is used.
+    The slate image comes from slate.frame_path in daily.yaml; when it is unset
+    or missing, a blank (black) slate is produced.
     Pass ocio_processor to colour-transform a linear EXR slate; PNG slates should
     always be loaded without a transform.
     """
@@ -35,8 +32,8 @@ class SlateGenerator:
         canvas_w, canvas_h = output_size
         canvas = np.zeros((canvas_h, canvas_w, 3), dtype=np.float32)
 
-        path = config.frame_path or _BUNDLED_FRAME
-        if not path.exists():
+        path = config.frame_path
+        if path is None or not path.exists():
             return canvas
 
         if path.suffix.lower() == ".exr":
