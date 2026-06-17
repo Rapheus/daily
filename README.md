@@ -39,7 +39,7 @@ Each frame runs through a fixed pipeline: **read EXR → OCIO transform → resi
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate.bat
 
 pip install .                    # core CLI
 pip install ".[web]"             # + the daily-web web UI
