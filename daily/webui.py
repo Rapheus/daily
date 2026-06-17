@@ -44,11 +44,6 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def _posix(p: str | Path) -> str:
-    """Render a path with forward slashes for display in the web form."""
-    return Path(p).as_posix() if p else ""
-
-
 def _resolve_repo_relative(raw: str) -> str:
     """Normalise a user-entered path to an absolute, forward-slash string.
 
@@ -73,6 +68,11 @@ def _resolve_repo_relative(raw: str) -> str:
     if not is_glob and cwd_cand.exists() and not repo_cand.exists():
         return cwd_cand.resolve().as_posix()
     return repo_cand.resolve().as_posix()
+
+
+def _norm(*paths: str) -> tuple[str, ...]:
+    """Normalise several path fields through :func:`_resolve_repo_relative`."""
+    return tuple(_resolve_repo_relative(p) for p in paths)
 
 
 def _default_config_paths() -> dict[str, str]:
@@ -192,9 +192,6 @@ def _compute_form_defaults(
     input_default = cwd.as_posix().rstrip("/") + "/**"
 
     return {
-        "eff_daily": eff_daily,
-        "eff_codecs": eff_codecs,
-        "eff_text": eff_text,
         "codec_choices": codec_choices,
         "codec": cfg.output.codec if cfg else (codec_choices[0] if codec_choices else None),
         "resolution": (
@@ -205,9 +202,7 @@ def _compute_form_defaults(
         "threads": cfg.output.threads if cfg else None,
         "trim": cfg.output.trim_overscan if cfg else True,
         "ocio_config": ocio_config,
-        "type": cfg.ocio.transform.type if cfg else "colorconvert",
         "src": cfg.ocio.transform.src if cfg else "",
-        "dst": cfg.ocio.transform.dst if cfg else "",
         "display": display,
         "view": cfg.ocio.transform.view if cfg else "",
         "looks": cfg.ocio.transform.looks if cfg else [],
@@ -284,6 +279,33 @@ def _build_set_overrides(
     return ov
 
 
+def _build_config(
+    input_glob: str,
+    output_path: str,
+    codec: str,
+    config_path: str,
+    codecs_path: str,
+    text_overlays_path: str,
+    set_ov: dict[str, Any],
+    *,
+    text: dict[str, str] | None = None,
+) -> Any:
+    """Wrap :func:`build_daily_config` with the form's path-to-arg plumbing."""
+    def _opt(s: str) -> Path | None:
+        return Path(s) if s else None
+
+    return build_daily_config(
+        input_path=input_glob,
+        output=output_path or None,
+        codec=codec or None,
+        text=text or None,
+        set_overrides=set_ov,
+        config_path=_opt(config_path),
+        codecs_path=_opt(codecs_path),
+        text_overlays_path=_opt(text_overlays_path),
+    )
+
+
 def _preview(
     input_glob: str,
     output_path: str,
@@ -308,11 +330,9 @@ def _preview(
 ) -> str:
     if not input_glob:
         return "Enter an input path or glob pattern first."
-    input_glob = _resolve_repo_relative(input_glob)
-    output_path = _resolve_repo_relative(output_path)
-    config_path = _resolve_repo_relative(config_path)
-    codecs_path = _resolve_repo_relative(codecs_path)
-    text_overlays_path = _resolve_repo_relative(text_overlays_path)
+    input_glob, output_path, config_path, codecs_path, text_overlays_path = _norm(
+        input_glob, output_path, config_path, codecs_path, text_overlays_path
+    )
     try:
         seqs = discover_sequences(Path(input_glob))
         set_ov = _build_set_overrides(
@@ -322,14 +342,9 @@ def _preview(
             framerate, resolution, threads,
             cropmask_enable, cropmask_aspect, cropmask_opacity,
         )
-        config = build_daily_config(
-            input_path=input_glob,
-            output=output_path or None,
-            codec=codec or None,
-            set_overrides=set_ov,
-            config_path=Path(config_path) if config_path else None,
-            codecs_path=Path(codecs_path) if codecs_path else None,
-            text_overlays_path=Path(text_overlays_path) if text_overlays_path else None,
+        config = _build_config(
+            input_glob, output_path, codec,
+            config_path, codecs_path, text_overlays_path, set_ov,
         )
         out_paths = _daily.compute_output_paths(config, seqs)
         slate_n = config.slate.duration_frames if config.slate.enable else 0
@@ -438,11 +453,9 @@ def _encode(
     if not input_glob:
         raise gr.Error("Input path / glob is required.")
 
-    input_glob = _resolve_repo_relative(input_glob)
-    output_path = _resolve_repo_relative(output_path)
-    config_path = _resolve_repo_relative(config_path)
-    codecs_path = _resolve_repo_relative(codecs_path)
-    text_overlays_path = _resolve_repo_relative(text_overlays_path)
+    input_glob, output_path, config_path, codecs_path, text_overlays_path = _norm(
+        input_glob, output_path, config_path, codecs_path, text_overlays_path
+    )
 
     cli_text: dict[str, str] = {}
     if text_kv is not None:
@@ -466,15 +479,10 @@ def _encode(
     set_ov["text_enable"] = bool(text_enable)
 
     try:
-        config = build_daily_config(
-            input_path=input_glob,
-            output=output_path or None,
-            codec=codec or None,
-            text=cli_text or None,
-            set_overrides=set_ov,
-            config_path=Path(config_path) if config_path else None,
-            codecs_path=Path(codecs_path) if codecs_path else None,
-            text_overlays_path=Path(text_overlays_path) if text_overlays_path else None,
+        config = _build_config(
+            input_glob, output_path, codec,
+            config_path, codecs_path, text_overlays_path, set_ov,
+            text=cli_text,
         )
     except Exception as e:
         raise gr.Error(f"Config error: {e}")
@@ -625,54 +633,59 @@ def create_app() -> gr.Blocks:
             cropmask_enable, cropmask_aspect, cropmask_opacity,
         ]
 
-        def _reload(daily_path: str, codecs_path: str, text_overlays_path: str) -> tuple:
+        # Components updated by Reload. Returning a {component: value} dict (rather
+        # than a positional tuple) keeps each field paired with its value, so the
+        # handler and this output list can't silently drift out of order.
+        _reload_outputs = [
+            input_glob, output_path, codec_dd, resolution, framerate, threads,
+            trim_overscan, ocio_config_path, transform_src,
+            transform_display, transform_view, transform_looks,
+            slate_enable, slate_frame_path, slate_duration, slate_fit,
+            slate_ocio_transform, cropmask_enable, cropmask_aspect,
+            cropmask_opacity, text_enable, _views_state,
+        ]
+
+        def _reload(daily_path: str, codecs_path: str, text_overlays_path: str) -> dict:
             r = _compute_form_defaults(daily_path, codecs_path, text_overlays_path)
             cc = r["codec_choices"]
-            return (
-                gr.update(value=r["input"]),
-                gr.update(value=r["output"]),
-                gr.update(
+            return {
+                input_glob: r["input"],
+                output_path: r["output"],
+                codec_dd: gr.update(
                     choices=cc,
                     value=r["codec"] if r["codec"] in cc else (cc[0] if cc else None),
                 ),
-                gr.update(value=r["resolution"]),
-                gr.update(value=r["framerate"]),
-                gr.update(value=r["threads"]),
-                gr.update(value=r["trim"]),
-                gr.update(value=r["ocio_config"]),
-                gr.update(choices=_with(r["cs"], r["src"]), value=r["src"] or None),
-                gr.update(
+                resolution: r["resolution"],
+                framerate: r["framerate"],
+                threads: r["threads"],
+                trim_overscan: r["trim"],
+                ocio_config_path: r["ocio_config"],
+                transform_src: gr.update(choices=_with(r["cs"], r["src"]), value=r["src"] or None),
+                transform_display: gr.update(
                     choices=_with(r["displays"], r["display"]), value=r["display"] or None,
                 ),
-                gr.update(
+                transform_view: gr.update(
                     choices=_with(r["views_for_display"], r["view"]), value=r["view"] or None,
                 ),
-                gr.update(
+                transform_looks: gr.update(
                     choices=_with_all(r["looks_all"], r["looks"]), value=r["looks"],
                 ),
-                gr.update(value=r["slate_enable"]),
-                gr.update(value=r["slate_path"]),
-                gr.update(value=r["slate_dur"]),
-                gr.update(value=r["slate_fit"]),
-                gr.update(value=r["slate_ocio"]),
-                gr.update(value=r["crop_enable"]),
-                gr.update(value=r["crop_aspect"]),
-                gr.update(value=r["crop_opacity"]),
-                gr.update(value=r["text_enable"]),
-                r["views_map"],
-            )
+                slate_enable: r["slate_enable"],
+                slate_frame_path: r["slate_path"],
+                slate_duration: r["slate_dur"],
+                slate_fit: r["slate_fit"],
+                slate_ocio_transform: r["slate_ocio"],
+                cropmask_enable: r["crop_enable"],
+                cropmask_aspect: r["crop_aspect"],
+                cropmask_opacity: r["crop_opacity"],
+                text_enable: r["text_enable"],
+                _views_state: r["views_map"],
+            }
 
         reload_btn.click(
             fn=_reload,
             inputs=[config_path_in, codecs_path_in, text_overlays_path_in],
-            outputs=[
-                input_glob, output_path, codec_dd, resolution, framerate, threads,
-                trim_overscan, ocio_config_path, transform_src,
-                transform_display, transform_view, transform_looks,
-                slate_enable, slate_frame_path, slate_duration, slate_fit,
-                slate_ocio_transform, cropmask_enable, cropmask_aspect,
-                cropmask_opacity, text_enable, _views_state,
-            ],
+            outputs=_reload_outputs,
         )
 
         browse_btn.click(fn=_browse_folder, outputs=[input_glob])
