@@ -400,29 +400,6 @@ def _load_ocio(config_path: str, daily_path: str = "") -> tuple:
     )
 
 
-def _browse_folder() -> Any:
-    """Open a native folder picker and return the chosen dir as a recursive glob.
-
-    The OS dialog runs on the machine hosting daily-web (the same machine, since
-    it opens a local browser). On cancel — or if no display/tk is available — the
-    field is left untouched.
-    """
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        folder = filedialog.askdirectory()
-        root.destroy()
-    except Exception:
-        return gr.update()
-    if not folder:
-        return gr.update()
-    return gr.update(value=Path(folder).as_posix().rstrip("/") + "/**")
-
-
 def _update_views(display: str, views_state: dict) -> gr.update:
     views = (views_state or {}).get(display, [])
     return gr.update(choices=views, value=views[0] if views else None)
@@ -564,14 +541,11 @@ def create_app() -> gr.Blocks:
             reload_btn = gr.Button("Reload from config files")
 
         with gr.Accordion("Input", open=True):
-            with gr.Row():
-                input_glob = gr.Textbox(
-                    label="Input path / glob",
-                    placeholder="shots/**/*.exr",
-                    value=d["input"],
-                    scale=4,
-                )
-                browse_btn = gr.Button("Browse folder…", scale=1)
+            input_glob = gr.Textbox(
+                label="Input path / glob",
+                placeholder="shots/**/*.exr",
+                value=d["input"],
+            )
             codec_dd = gr.Dropdown(
                 label="Codec",
                 choices=codec_choices,
@@ -722,10 +696,6 @@ def create_app() -> gr.Blocks:
             inputs=[config_path_in, codecs_path_in, text_overlays_path_in],
             outputs=_reload_outputs,
         )
-
-        # show_progress="hidden" keeps the input field from showing a spinner/timer
-        # while the (blocking) native folder dialog is open.
-        browse_btn.click(fn=_browse_folder, outputs=[input_glob], show_progress="hidden")
 
         preview_btn.click(
             fn=_preview,
