@@ -6,6 +6,8 @@ CLI does, with **dropdowns for OCIO colourspaces, displays, views, and looks** (
 
 The web UI is an optional extra — the core CLI and library do not depend on Gradio.
 
+![daily web UI](.github/assets/gradioui.png)
+
 ## Install & launch
 
 ```bash

@@ -75,6 +75,23 @@ def _norm(*paths: str) -> tuple[str, ...]:
     return tuple(_resolve_repo_relative(p) for p in paths)
 
 
+def _repo_relative_display(p: str | Path) -> str:
+    """Show a path as ``./repo-relative`` when it lives under the repo, else absolute.
+
+    The inverse of :func:`_resolve_repo_relative` for display: the form shows
+    ``./config/daily.yaml`` instead of an absolute path, and resolution still
+    works because that function re-anchors relative paths on the repo root.
+    """
+    if not p or (isinstance(p, str) and p.startswith("$")):
+        return p or ""
+    path = Path(p)
+    try:
+        rel = path.resolve().relative_to(_repo_root())
+    except ValueError:
+        return path.as_posix()
+    return "./" + rel.as_posix() if rel.parts else "."
+
+
 def _default_config_paths() -> dict[str, str]:
     """Absolute paths to the config files daily would load by default.
 
@@ -178,7 +195,7 @@ def _compute_form_defaults(
     if cfg:
         p = _resolve_ocio(cfg.ocio.config, eff_daily)
         if p is not None:
-            ocio_config = p.as_posix()
+            ocio_config = _repo_relative_display(p)
             ocio_opts = list_ocio_options(p)
 
     display = cfg.ocio.transform.display if cfg else ""
@@ -213,7 +230,7 @@ def _compute_form_defaults(
         "looks_all": ocio_opts["looks"],
         "slate_enable": cfg.slate.enable if cfg else False,
         "slate_path": (
-            cfg.slate.frame_path.resolve().as_posix() if cfg and cfg.slate.frame_path else ""
+            _repo_relative_display(cfg.slate.frame_path) if cfg and cfg.slate.frame_path else ""
         ),
         "slate_dur": cfg.slate.duration_frames if cfg else 24,
         "slate_fit": cfg.slate.fit if cfg else "horizontal",
@@ -505,6 +522,19 @@ def _encode(
     return "Encoded:\n" + "\n".join(f"  {p}" for p in out_paths)
 
 
+# Default to the dark theme by adding ?__theme=dark to the URL (Gradio reads this
+# query param to pick its colour scheme) — but only when no theme is set yet, so
+# an explicit user choice (?__theme=light from the theme toggle) is respected.
+_FORCE_DARK_JS = """
+() => {
+    const url = new URL(window.location);
+    if (url.searchParams.get('__theme') === null) {
+        url.searchParams.set('__theme', 'dark');
+        window.location.replace(url.href);
+    }
+}
+"""
+
 def create_app() -> gr.Blocks:
     d = _compute_form_defaults()
     codec_choices = d["codec_choices"]
@@ -521,14 +551,19 @@ def create_app() -> gr.Blocks:
                 "inside the config are resolved relative to the daily.yaml, so "
                 "this works regardless of where you launched daily-web."
             )
-            config_path_in = gr.Textbox(label="daily.yaml path", value=cfg_paths["daily"])
-            codecs_path_in = gr.Textbox(label="codecs.yaml path", value=cfg_paths["codecs"])
+            config_path_in = gr.Textbox(
+                label="daily.yaml path", value=_repo_relative_display(cfg_paths["daily"]),
+            )
+            codecs_path_in = gr.Textbox(
+                label="codecs.yaml path", value=_repo_relative_display(cfg_paths["codecs"]),
+            )
             text_overlays_path_in = gr.Textbox(
-                label="text_overlays.yaml path", value=cfg_paths["text_overlays"],
+                label="text_overlays.yaml path",
+                value=_repo_relative_display(cfg_paths["text_overlays"]),
             )
             reload_btn = gr.Button("Reload from config files")
 
-        with gr.Accordion("Input / Output", open=True):
+        with gr.Accordion("Input", open=True):
             with gr.Row():
                 input_glob = gr.Textbox(
                     label="Input path / glob",
@@ -537,7 +572,6 @@ def create_app() -> gr.Blocks:
                     scale=4,
                 )
                 browse_btn = gr.Button("Browse folder…", scale=1)
-                preview_btn = gr.Button("Preview sequences", scale=1)
             codec_dd = gr.Dropdown(
                 label="Codec",
                 choices=codec_choices,
@@ -616,12 +650,13 @@ def create_app() -> gr.Blocks:
                 col_count=(2, "fixed"),
             )
 
-        output_path = gr.Textbox(label="Output path or directory", value=d["output"])
+        output_path = gr.Textbox(label="Output", value=d["output"])
         verbose = gr.Checkbox(label="Verbose logging", value=False)
+        preview_btn = gr.Button("Preview sequences")
         with gr.Row():
             run_btn = gr.Button("Encode", variant="primary", scale=4)
             stop_btn = gr.Button("Stop", variant="stop", scale=1)
-        output_box = gr.Textbox(label="Output", interactive=False, lines=6)
+        output_box = gr.Textbox(show_label=False, interactive=False, lines=6)
 
         # Inputs shared between preview and encode (the set_overrides block)
         _set_ov_inputs = [
@@ -688,7 +723,9 @@ def create_app() -> gr.Blocks:
             outputs=_reload_outputs,
         )
 
-        browse_btn.click(fn=_browse_folder, outputs=[input_glob])
+        # show_progress="hidden" keeps the input field from showing a spinner/timer
+        # while the (blocking) native folder dialog is open.
+        browse_btn.click(fn=_browse_folder, outputs=[input_glob], show_progress="hidden")
 
         preview_btn.click(
             fn=_preview,
@@ -730,6 +767,9 @@ def create_app() -> gr.Blocks:
         # The Stop handler must run while an encode occupies its concurrency slot,
         # so give it its own group with room to run concurrently.
         stop_btn.click(fn=_stop, outputs=[output_box], concurrency_limit=None)
+
+        # Run the dark-theme redirect when the frontend loads.
+        demo.load(js=_FORCE_DARK_JS)
 
     return demo
 
